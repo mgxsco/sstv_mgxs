@@ -28,18 +28,24 @@
         button:hover { background: #3dbdb5; }
         button:disabled { opacity: 0.5; cursor: not-allowed; }
         button.secondary { background: rgba(255,255,255,0.1); }
+        button.recording { background: #e74c3c; animation: pulse 1s infinite; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.7; } }
         .status { text-align: center; margin-top: 1rem; color: #8892b0; min-height: 1.5em; }
         .waveform { height: 60px; background: #000; border-radius: 8px; margin-top: 1rem; }
         .waveform canvas { width: 100%; height: 100%; display: block; }
         .progress { height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; margin-top: 0.5rem; overflow: hidden; }
         .progress-fill { height: 100%; background: #4ecdc4; width: 0%; transition: width 0.1s; }
         input[type="file"] { display: none; }
+        .freq-display { font-family: monospace; font-size: 1.5rem; text-align: center; color: #4ecdc4; padding: 0.5rem; }
+        .signal-bar { height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; margin-top: 0.5rem; overflow: hidden; }
+        .signal-fill { height: 100%; background: linear-gradient(90deg, #e74c3c 0%, #f1c40f 50%, #2ecc71 100%); width: 0%; transition: width 0.1s; }
+        .hint { font-size: 0.8rem; color: #8892b0; text-align: center; margin-top: 0.5rem; }
     </style>
 </head>
 <body>
     <div class="tabs">
-        <div class="tab active" onclick="showTab('tx')">📡 TX (Encode)</div>
-        <div class="tab" onclick="showTab('rx')">📻 RX (Decode)</div>
+        <div class="tab active" onclick="showTab('tx')">TX (Encode)</div>
+        <div class="tab" onclick="showTab('rx')">RX (Decode)</div>
     </div>
 
     <div id="tx" class="content active">
@@ -51,14 +57,14 @@
             </div>
             <input type="file" id="file" accept="image/*">
             <div class="controls">
-                <button onclick="document.getElementById('file').click()" class="secondary">📁 Upload</button>
+                <button onclick="document.getElementById('file').click()" class="secondary">Upload</button>
             </div>
         </div>
         <div class="panel">
             <h2>Transmit</h2>
             <div class="controls">
-                <button id="tx-btn" onclick="transmit()" disabled>📡 Transmit</button>
-                <button id="tx-stop" onclick="stopTx()" disabled class="secondary">⏹ Stop</button>
+                <button id="tx-btn" onclick="transmit()" disabled>Transmit</button>
+                <button id="tx-stop" onclick="stopTx()" disabled class="secondary">Stop</button>
             </div>
             <div class="waveform"><canvas id="tx-wave"></canvas></div>
             <div class="progress"><div class="progress-fill" id="tx-progress"></div></div>
@@ -68,23 +74,28 @@
 
     <div id="rx" class="content">
         <div class="panel">
-            <h2>Record</h2>
+            <h2>Audio Input</h2>
             <div class="controls">
-                <button id="rx-btn" onclick="startRx()">🎙️ Start Recording</button>
-                <button id="rx-stop" onclick="stopRx()" disabled class="secondary">⏹ Stop</button>
-                <button id="rx-decode" onclick="decode()" disabled class="secondary">🔍 Decode</button>
+                <button id="rx-btn" onclick="toggleRx()">Start Listening</button>
+                <button onclick="document.getElementById('audio-file').click()" class="secondary">Load Audio File</button>
             </div>
+            <input type="file" id="audio-file" accept="audio/*,.wav,.mp3,.ogg,.m4a">
+            <div class="freq-display" id="freq-display">-- Hz</div>
+            <div class="signal-bar"><div class="signal-fill" id="signal-bar"></div></div>
             <div class="waveform"><canvas id="rx-wave"></canvas></div>
-            <div class="status" id="rx-status">Click Start Recording</div>
+            <div class="progress"><div class="progress-fill" id="rx-progress"></div></div>
+            <div class="status" id="rx-status">Click "Start Listening" or load an audio file</div>
+            <div class="hint">Robot36 takes ~36 seconds. Recording auto-stops after 45s.</div>
         </div>
         <div class="panel">
             <h2>Decoded Image</h2>
             <div class="image-box" style="cursor:default;">
-                <canvas id="rx-canvas" width="320" height="240" style="display:none;"></canvas>
+                <canvas id="rx-canvas" width="320" height="240"></canvas>
                 <div class="placeholder" id="rx-placeholder">Image will appear here</div>
             </div>
             <div class="controls">
-                <button id="rx-save" onclick="saveImage()" disabled class="secondary">💾 Save</button>
+                <button id="rx-save" onclick="saveImage()" disabled class="secondary">Save Image</button>
+                <button id="rx-clear" onclick="clearRx()" class="secondary">Clear</button>
             </div>
         </div>
     </div>
@@ -92,7 +103,6 @@
 <script>
 // ============================================
 // SSTV Robot36 - JavaScript Implementation
-// Ported from Python encoder/decoder
 // ============================================
 
 const SAMPLE_RATE = 44100;
@@ -123,7 +133,7 @@ const LINE_DURATION = SYNC_DURATION + SYNC_PORCH_DURATION + Y_SCAN_DURATION +
                       SEPARATOR_DURATION + COLOR_PORCH_DURATION + COLOR_SCAN_DURATION;
 
 // ============================================
-// Color Conversion (matches Python exactly)
+// Color Conversion
 // ============================================
 function rgbToYCrCb(r, g, b) {
     const y = 16 + 65.481 * r / 255 + 128.553 * g / 255 + 24.966 * b / 255;
@@ -157,13 +167,12 @@ function freqToValue(freq) {
 }
 
 // ============================================
-// ENCODER (matches Python exactly)
+// ENCODER
 // ============================================
 function encodeSSTV(imageData) {
     const samples = [];
     let phase = 0;
 
-    // Generate tone with phase continuity
     function addTone(freq, duration) {
         const numSamples = Math.floor(duration * SAMPLE_RATE);
         for (let i = 0; i < numSamples; i++) {
@@ -172,7 +181,6 @@ function encodeSSTV(imageData) {
         }
     }
 
-    // Generate FM signal with phase continuity
     function addFM(values, duration) {
         const numSamples = Math.floor(duration * SAMPLE_RATE);
         for (let i = 0; i < numSamples; i++) {
@@ -202,50 +210,33 @@ function encodeSSTV(imageData) {
         ycrcb.push({ y: yRow, cr: crRow, cb: cbRow });
     }
 
-    // Header: Leader tone (1900 Hz, 300ms)
+    // Header
     addTone(LEADER_FREQ, LEADER_DURATION);
-
-    // Break (1200 Hz, 10ms)
     addTone(FREQ_SYNC, BREAK_DURATION);
 
     // VIS code
-    addTone(FREQ_VIS_1, VIS_BIT_DURATION); // Start bit
+    addTone(FREQ_VIS_1, VIS_BIT_DURATION);
     let parity = 0;
     for (let i = 0; i < 7; i++) {
         const bit = (VIS_CODE >> i) & 1;
         parity ^= bit;
         addTone(bit ? FREQ_VIS_1 : FREQ_VIS_0, VIS_BIT_DURATION);
     }
-    addTone(parity ? FREQ_VIS_1 : FREQ_VIS_0, VIS_BIT_DURATION); // Parity
-    addTone(FREQ_VIS_0, VIS_BIT_DURATION); // Stop bit
-
-    // Break after VIS
+    addTone(parity ? FREQ_VIS_1 : FREQ_VIS_0, VIS_BIT_DURATION);
+    addTone(FREQ_VIS_0, VIS_BIT_DURATION);
     addTone(FREQ_SYNC, BREAK_DURATION);
 
     // Scan lines
     for (let line = 0; line < HEIGHT; line++) {
         const isEven = line % 2 === 0;
-
-        // Sync pulse (1200 Hz, 9ms)
         addTone(FREQ_SYNC, SYNC_DURATION);
-
-        // Sync porch (1500 Hz, 3ms)
         addTone(FREQ_BLACK, SYNC_PORCH_DURATION);
-
-        // Y scan (88ms)
         addFM(ycrcb[line].y, Y_SCAN_DURATION);
-
-        // Separator (even: 1500Hz, odd: 2300Hz)
         addTone(isEven ? FREQ_BLACK : FREQ_WHITE, SEPARATOR_DURATION);
-
-        // Color porch (1500 Hz, 1.5ms)
         addTone(FREQ_BLACK, COLOR_PORCH_DURATION);
-
-        // Color scan (44ms) - Even: Cr, Odd: Cb
         addFM(isEven ? ycrcb[line].cr : ycrcb[line].cb, COLOR_SCAN_DURATION);
     }
 
-    // Normalize
     const audio = new Float32Array(samples.length);
     for (let i = 0; i < samples.length; i++) {
         audio[i] = samples[i] * 0.9;
@@ -254,29 +245,11 @@ function encodeSSTV(imageData) {
 }
 
 // ============================================
-// DECODER (matches Python exactly)
+// DECODER - Optimized for robustness
 // ============================================
 
-// Butterworth filter coefficients (pre-computed for efficiency)
-function butterBandpass(signal, lowFreq, highFreq, order = 5) {
-    // Simple IIR bandpass using biquad cascade approximation
-    const nyquist = SAMPLE_RATE / 2;
-    const low = lowFreq / nyquist;
-    const high = highFreq / nyquist;
-    const bw = high - low;
-    const center = (high + low) / 2;
-
-    // Use multiple passes of a simple bandpass for better filtering
-    let filtered = new Float32Array(signal);
-    for (let pass = 0; pass < order; pass++) {
-        filtered = simpleBandpass(filtered, lowFreq, highFreq);
-    }
-    return filtered;
-}
-
 function simpleBandpass(signal, lowFreq, highFreq) {
-    // FIR bandpass filter
-    const n = 127; // Filter order
+    const n = 101;
     const h = new Float32Array(n);
     const fc1 = lowFreq / SAMPLE_RATE;
     const fc2 = highFreq / SAMPLE_RATE;
@@ -288,11 +261,9 @@ function simpleBandpass(signal, lowFreq, highFreq) {
         } else {
             h[i] = (Math.sin(2 * Math.PI * fc2 * x) - Math.sin(2 * Math.PI * fc1 * x)) / (Math.PI * x);
         }
-        // Hamming window
         h[i] *= 0.54 - 0.46 * Math.cos(2 * Math.PI * i / (n - 1));
     }
 
-    // Convolve
     const filtered = new Float32Array(signal.length);
     const halfN = Math.floor(n / 2);
     for (let i = 0; i < signal.length; i++) {
@@ -309,7 +280,7 @@ function simpleBandpass(signal, lowFreq, highFreq) {
 }
 
 function lowpassFilter(signal, cutoff) {
-    const n = 63;
+    const n = 51;
     const h = new Float32Array(n);
     const fc = cutoff / SAMPLE_RATE;
 
@@ -338,23 +309,34 @@ function lowpassFilter(signal, cutoff) {
     return filtered;
 }
 
-// Hilbert transform using FFT
+// Simple zero-crossing frequency detector (faster, works well for clean signals)
+function detectFrequencyZC(signal, start, length) {
+    let crossings = 0;
+    let lastSign = signal[start] >= 0;
+
+    for (let i = start + 1; i < start + length && i < signal.length; i++) {
+        const sign = signal[i] >= 0;
+        if (sign !== lastSign) {
+            crossings++;
+            lastSign = sign;
+        }
+    }
+
+    return (crossings / 2) / (length / SAMPLE_RATE);
+}
+
+// Hilbert transform for FM demodulation
 function hilbert(signal) {
     const n = signal.length;
-
-    // Zero-pad to power of 2
     let fftSize = 1;
     while (fftSize < n) fftSize *= 2;
 
-    // Compute FFT
     const real = new Float32Array(fftSize);
     const imag = new Float32Array(fftSize);
     for (let i = 0; i < n; i++) real[i] = signal[i];
 
     fft(real, imag);
 
-    // Apply Hilbert transform in frequency domain
-    // H[0] = 1, H[n/2] = 1, H[1..n/2-1] = 2, H[n/2+1..n-1] = 0
     for (let i = 1; i < fftSize / 2; i++) {
         real[i] *= 2;
         imag[i] *= 2;
@@ -364,22 +346,18 @@ function hilbert(signal) {
         imag[i] = 0;
     }
 
-    // Inverse FFT
     ifft(real, imag);
 
-    // Return analytic signal (original length)
     return {
         real: real.slice(0, n),
         imag: imag.slice(0, n)
     };
 }
 
-// In-place FFT
 function fft(real, imag) {
     const n = real.length;
     if (n <= 1) return;
 
-    // Bit reversal
     let j = 0;
     for (let i = 0; i < n - 1; i++) {
         if (i < j) {
@@ -391,7 +369,6 @@ function fft(real, imag) {
         j += k;
     }
 
-    // Cooley-Tukey FFT
     for (let len = 2; len <= n; len *= 2) {
         const halfLen = len / 2;
         const angle = -2 * Math.PI / len;
@@ -412,25 +389,22 @@ function fft(real, imag) {
 
 function ifft(real, imag) {
     const n = real.length;
-    // Conjugate
     for (let i = 0; i < n; i++) imag[i] = -imag[i];
-    // Forward FFT
     fft(real, imag);
-    // Conjugate and scale
     for (let i = 0; i < n; i++) {
         real[i] /= n;
         imag[i] = -imag[i] / n;
     }
 }
 
-function demodulateFFM(signal) {
-    console.log('Bandpass filtering...');
-    const filtered = butterBandpass(signal, 1000, 2500, 2);
+function demodulateFFM(signal, onProgress) {
+    onProgress?.('Filtering signal...');
+    const filtered = simpleBandpass(signal, 900, 2500);
 
-    console.log('Computing Hilbert transform...');
+    onProgress?.('Computing FM demodulation...');
     const analytic = hilbert(filtered);
 
-    console.log('Extracting instantaneous frequency...');
+    onProgress?.('Extracting frequencies...');
     const freqs = new Float32Array(signal.length);
     let prevPhase = 0;
 
@@ -438,7 +412,6 @@ function demodulateFFM(signal) {
         const phase = Math.atan2(analytic.imag[i], analytic.real[i]);
         let phaseDiff = phase - prevPhase;
 
-        // Unwrap phase
         while (phaseDiff > Math.PI) phaseDiff -= 2 * Math.PI;
         while (phaseDiff < -Math.PI) phaseDiff += 2 * Math.PI;
 
@@ -446,12 +419,11 @@ function demodulateFFM(signal) {
         prevPhase = phase;
     }
 
-    console.log('Smoothing frequencies...');
-    const smoothed = lowpassFilter(freqs, 800);
+    onProgress?.('Smoothing...');
+    const smoothed = lowpassFilter(freqs, 1200);
 
-    // Clip to valid range
     for (let i = 0; i < smoothed.length; i++) {
-        smoothed[i] = Math.max(1100, Math.min(2400, smoothed[i]));
+        smoothed[i] = Math.max(1000, Math.min(2500, smoothed[i]));
     }
 
     return smoothed;
@@ -459,14 +431,14 @@ function demodulateFFM(signal) {
 
 function findSyncPulses(freqs) {
     const pulses = [];
-    const minSamples = Math.floor(0.006 * SAMPLE_RATE);
-    const maxSamples = Math.floor(0.015 * SAMPLE_RATE);
+    const minSamples = Math.floor(0.005 * SAMPLE_RATE); // More lenient: 5ms min
+    const maxSamples = Math.floor(0.020 * SAMPLE_RATE); // More lenient: 20ms max
 
     let inSync = false;
     let syncStart = 0;
 
     for (let i = 0; i < freqs.length; i++) {
-        const isSync = freqs[i] < 1350 && freqs[i] > 1100;
+        const isSync = freqs[i] < 1400 && freqs[i] > 1050; // Wider tolerance
 
         if (isSync && !inSync) {
             inSync = true;
@@ -482,96 +454,128 @@ function findSyncPulses(freqs) {
     return pulses;
 }
 
-function filterSyncPulses(pulses) {
-    if (pulses.length < 2) return pulses;
+function findRegularSyncs(pulses) {
+    if (pulses.length < 3) return pulses;
 
     const expectedInterval = Math.floor(LINE_DURATION * SAMPLE_RATE);
-    const tolerance = Math.floor(0.01 * SAMPLE_RATE);
+    const tolerance = Math.floor(0.020 * SAMPLE_RATE); // 20ms tolerance
 
+    // Find the most common interval
+    const intervals = [];
+    for (let i = 1; i < pulses.length; i++) {
+        intervals.push(pulses[i] - pulses[i-1]);
+    }
+
+    // Find pulses that match expected line timing
     const filtered = [pulses[0]];
     for (let i = 1; i < pulses.length; i++) {
         const dist = pulses[i] - filtered[filtered.length - 1];
-        if (Math.abs(dist - expectedInterval) < tolerance || dist > expectedInterval * 0.8) {
+        // Accept if close to expected interval or a multiple (for skipped lines)
+        const ratio = dist / expectedInterval;
+        if (ratio > 0.7 && ratio < 1.3) {
+            filtered.push(pulses[i]);
+        } else if (ratio > 1.7 && ratio < 2.3) {
+            // Skipped one line
             filtered.push(pulses[i]);
         }
     }
     return filtered;
 }
 
-function detectHeaderEnd(freqs) {
-    const windowSamples = Math.floor(0.05 * SAMPLE_RATE);
+function detectSignalStart(freqs) {
+    const windowSamples = Math.floor(0.02 * SAMPLE_RATE);
 
-    // Find leader tone (1900 Hz)
-    let leaderStart = null;
-    for (let i = 0; i < freqs.length - windowSamples; i += Math.floor(windowSamples / 2)) {
-        let count = 0;
+    // Look for leader tone (1900 Hz) or any strong signal in SSTV range
+    for (let i = 0; i < freqs.length - windowSamples; i += Math.floor(windowSamples / 4)) {
+        let leaderCount = 0;
+        let sstvCount = 0;
+
         for (let j = 0; j < windowSamples; j++) {
-            if (Math.abs(freqs[i + j] - LEADER_FREQ) < 150) count++;
+            if (Math.abs(freqs[i + j] - LEADER_FREQ) < 200) leaderCount++;
+            if (freqs[i + j] > 1100 && freqs[i + j] < 2400) sstvCount++;
         }
-        if (count / windowSamples > 0.6) {
-            leaderStart = i;
-            break;
+
+        // Found leader tone
+        if (leaderCount / windowSamples > 0.5) {
+            // Find where leader ends
+            for (let k = i + windowSamples; k < freqs.length; k++) {
+                if (freqs[k] < 1400) {
+                    // Skip VIS code area (~350ms)
+                    const headerDuration = BREAK_DURATION + 10 * VIS_BIT_DURATION + BREAK_DURATION;
+                    return Math.min(k + Math.floor(headerDuration * SAMPLE_RATE), freqs.length - 1);
+                }
+            }
+        }
+
+        // Or found sync pulse directly
+        if (freqs[i] < 1300 && freqs[i] > 1100 && sstvCount / windowSamples > 0.7) {
+            return Math.max(0, i - Math.floor(0.01 * SAMPLE_RATE));
         }
     }
 
-    if (leaderStart === null) {
-        console.log('Warning: Could not detect leader tone');
-        return 0;
-    }
-
-    // Find end of leader
-    let leaderEnd = leaderStart;
-    for (let i = leaderStart + windowSamples; i < freqs.length; i++) {
-        if (freqs[i] < 1400) {
-            leaderEnd = i;
-            break;
-        }
-    }
-
-    // Skip header (break + VIS + break)
-    const headerDuration = BREAK_DURATION + 10 * VIS_BIT_DURATION + BREAK_DURATION;
-    return Math.min(leaderEnd + Math.floor(headerDuration * SAMPLE_RATE), freqs.length - 1);
+    return 0; // Start from beginning if no clear header
 }
 
-function decodeSSTV(audio) {
+function decodeSSTV(audio, onProgress, onLine) {
     console.log('Decoding', audio.length, 'samples...');
+    onProgress?.('Starting decode...', 0);
+
+    // Normalize audio
+    let maxAmp = 0;
+    for (let i = 0; i < audio.length; i++) {
+        maxAmp = Math.max(maxAmp, Math.abs(audio[i]));
+    }
+    if (maxAmp > 0) {
+        const normalized = new Float32Array(audio.length);
+        for (let i = 0; i < audio.length; i++) {
+            normalized[i] = audio[i] / maxAmp;
+        }
+        audio = normalized;
+    }
 
     // FM demodulation
-    const freqs = demodulateFFM(audio);
+    const freqs = demodulateFFM(audio, onProgress);
 
-    // Detect header
-    console.log('Detecting header...');
-    const imageStart = detectHeaderEnd(freqs);
+    onProgress?.('Finding signal start...', 10);
+    const imageStart = detectSignalStart(freqs);
     console.log('Image starts at sample', imageStart);
 
-    // Find sync pulses
-    console.log('Finding sync pulses...');
+    onProgress?.('Finding sync pulses...', 20);
     let syncPulses = findSyncPulses(freqs.slice(imageStart));
     syncPulses = syncPulses.map(s => s + imageStart);
     console.log('Found', syncPulses.length, 'potential sync pulses');
 
-    syncPulses = filterSyncPulses(syncPulses);
+    syncPulses = findRegularSyncs(syncPulses);
     console.log('Filtered to', syncPulses.length, 'line syncs');
 
-    if (syncPulses.length < 10) {
-        console.log('Not enough sync pulses');
-        return null;
+    // Accept even with very few sync pulses (will show partial image)
+    if (syncPulses.length < 3) {
+        // Try alternative: assume lines start at regular intervals from beginning
+        console.log('Few syncs found, using regular interval fallback');
+        const lineSamples = Math.floor(LINE_DURATION * SAMPLE_RATE);
+        syncPulses = [];
+        for (let i = imageStart; i < freqs.length - lineSamples; i += lineSamples) {
+            syncPulses.push(i);
+            if (syncPulses.length >= HEIGHT) break;
+        }
     }
 
-    // Initialize image arrays (Cr/Cb at 128 = neutral)
-    const yImage = new Array(HEIGHT).fill(null).map(() => new Uint8Array(WIDTH).fill(0));
+    // Initialize image arrays
+    const yImage = new Array(HEIGHT).fill(null).map(() => new Uint8Array(WIDTH).fill(128));
     const crImage = new Array(HEIGHT).fill(null).map(() => new Uint8Array(WIDTH).fill(128));
     const cbImage = new Array(HEIGHT).fill(null).map(() => new Uint8Array(WIDTH).fill(128));
 
-    const lineSamples = Math.floor(LINE_DURATION * SAMPLE_RATE);
     const syncSamples = Math.floor(SYNC_DURATION * SAMPLE_RATE);
     const porchSamples = Math.floor(SYNC_PORCH_DURATION * SAMPLE_RATE);
     const ySamples = Math.floor(Y_SCAN_DURATION * SAMPLE_RATE);
     const sepSamples = Math.floor(SEPARATOR_DURATION * SAMPLE_RATE);
     const colorPorchSamples = Math.floor(COLOR_PORCH_DURATION * SAMPLE_RATE);
     const colorSamples = Math.floor(COLOR_SCAN_DURATION * SAMPLE_RATE);
+    const lineSamples = Math.floor(LINE_DURATION * SAMPLE_RATE);
 
     let linesDecoded = 0;
+
+    onProgress?.('Decoding lines...', 30);
 
     for (let i = 0; i < syncPulses.length && linesDecoded < HEIGHT; i++) {
         const syncPos = syncPulses[i];
@@ -592,7 +596,7 @@ function decodeSSTV(audio) {
         const colorStart = yEnd + sepSamples + colorPorchSamples;
         const colorEnd = colorStart + colorSamples;
         const isEven = linesDecoded % 2 === 0;
-        const colorImg = isEven ? cbImage : crImage; // SWAPPED to match Python fix
+        const colorImg = isEven ? cbImage : crImage;
 
         for (let x = 0; x < WIDTH; x++) {
             const idx = colorStart + Math.floor(x / WIDTH * (colorEnd - colorStart));
@@ -602,31 +606,36 @@ function decodeSSTV(audio) {
         }
 
         linesDecoded++;
+
+        // Progress callback
+        if (linesDecoded % 10 === 0 || linesDecoded === HEIGHT) {
+            const pct = 30 + (linesDecoded / HEIGHT) * 60;
+            onProgress?.(`Decoded ${linesDecoded}/${HEIGHT} lines`, pct);
+            onLine?.(linesDecoded, yImage, crImage, cbImage);
+        }
     }
 
     console.log('Decoded', linesDecoded, 'lines');
 
-    // Interpolate missing color channels (matches Python exactly)
+    if (linesDecoded < 3) {
+        return null;
+    }
+
+    onProgress?.('Interpolating colors...', 92);
+
+    // Interpolate missing color channels
     for (let i = 0; i < linesDecoded; i++) {
         const isEven = i % 2 === 0;
         if (isEven) {
-            // Even line has Cb, need Cr
-            if (i > 0) {
-                crImage[i] = crImage[i - 1].slice();
-            } else if (i + 1 < linesDecoded) {
-                crImage[i] = crImage[i + 1].slice();
-            }
+            if (i > 0) crImage[i] = crImage[i - 1].slice();
+            else if (i + 1 < linesDecoded) crImage[i] = crImage[i + 1].slice();
         } else {
-            // Odd line has Cr, need Cb
-            if (i > 0) {
-                cbImage[i] = cbImage[i - 1].slice();
-            } else if (i + 1 < linesDecoded) {
-                cbImage[i] = cbImage[i + 1].slice();
-            }
+            if (i > 0) cbImage[i] = cbImage[i - 1].slice();
+            else if (i + 1 < linesDecoded) cbImage[i] = cbImage[i + 1].slice();
         }
     }
 
-    // Second pass: average interpolation
+    // Average interpolation pass
     for (let i = 1; i < linesDecoded - 1; i++) {
         const isEven = i % 2 === 0;
         if (isEven) {
@@ -639,6 +648,8 @@ function decodeSSTV(audio) {
             }
         }
     }
+
+    onProgress?.('Rendering image...', 98);
 
     // Convert to RGB
     const canvas = document.getElementById('rx-canvas');
@@ -656,13 +667,16 @@ function decodeSSTV(audio) {
         }
     }
 
+    onProgress?.('Done!', 100);
     return imgData;
 }
 
 // ============================================
 // UI Code
 // ============================================
-let audioCtx, txSource, rxStream, rxChunks = [], isRecording = false, analyser, animFrame;
+let audioCtx, txSource, rxStream, rxChunks = [], isListening = false, analyser, animFrame;
+let rxProcessor, rxSource;
+const MAX_RECORD_SECONDS = 45;
 
 function showTab(id) {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -744,57 +758,129 @@ function stopTx() {
     document.getElementById('tx-status').textContent = 'Stopped';
 }
 
-async function startRx() {
+// RX: Toggle listening
+async function toggleRx() {
+    if (isListening) {
+        stopListening();
+    } else {
+        await startListening();
+    }
+}
+
+async function startListening() {
     try {
         rxStream = await navigator.mediaDevices.getUserMedia({
-            audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+            audio: {
+                echoCancellation: false,
+                noiseSuppression: false,
+                autoGainControl: false,
+                sampleRate: SAMPLE_RATE
+            }
         });
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
-        const source = audioCtx.createMediaStreamSource(rxStream);
-        analyser = audioCtx.createAnalyser();
-        const processor = audioCtx.createScriptProcessor(4096, 1, 1);
 
-        source.connect(analyser);
-        analyser.connect(processor);
-        processor.connect(audioCtx.destination);
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+        rxSource = audioCtx.createMediaStreamSource(rxStream);
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 2048;
+        rxProcessor = audioCtx.createScriptProcessor(4096, 1, 1);
+
+        rxSource.connect(analyser);
+        analyser.connect(rxProcessor);
+        rxProcessor.connect(audioCtx.destination);
 
         rxChunks = [];
-        isRecording = true;
+        isListening = true;
 
-        processor.onaudioprocess = e => {
-            if (isRecording) rxChunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+        rxProcessor.onaudioprocess = e => {
+            if (isListening) {
+                rxChunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+
+                // Auto-stop after max time
+                const totalSamples = rxChunks.reduce((s, c) => s + c.length, 0);
+                if (totalSamples > SAMPLE_RATE * MAX_RECORD_SECONDS) {
+                    stopAndDecode();
+                }
+            }
         };
 
-        document.getElementById('rx-btn').disabled = true;
-        document.getElementById('rx-stop').disabled = false;
-        document.getElementById('rx-status').textContent = 'Recording...';
+        const btn = document.getElementById('rx-btn');
+        btn.textContent = 'Stop & Decode';
+        btn.classList.add('recording');
+        document.getElementById('rx-status').textContent = 'Listening... (speak/play SSTV audio)';
 
-        function updateRx() {
-            if (!isRecording) return;
-            drawWaveform('rx-wave');
-            const secs = rxChunks.reduce((s, c) => s + c.length, 0) / SAMPLE_RATE;
-            document.getElementById('rx-status').textContent = `Recording: ${secs.toFixed(1)}s`;
-            animFrame = requestAnimationFrame(updateRx);
-        }
-        updateRx();
+        updateRxDisplay();
     } catch (err) {
         document.getElementById('rx-status').textContent = 'Mic error: ' + err.message;
     }
 }
 
-function stopRx() {
-    isRecording = false;
-    if (rxStream) { rxStream.getTracks().forEach(t => t.stop()); rxStream = null; }
+function stopListening() {
+    isListening = false;
+    if (rxStream) {
+        rxStream.getTracks().forEach(t => t.stop());
+        rxStream = null;
+    }
+    if (rxProcessor) {
+        rxProcessor.disconnect();
+        rxProcessor = null;
+    }
+    if (rxSource) {
+        rxSource.disconnect();
+        rxSource = null;
+    }
     if (animFrame) cancelAnimationFrame(animFrame);
-    document.getElementById('rx-btn').disabled = false;
-    document.getElementById('rx-stop').disabled = true;
-    document.getElementById('rx-decode').disabled = rxChunks.length === 0;
-    document.getElementById('rx-status').textContent = 'Ready to decode';
+
+    const btn = document.getElementById('rx-btn');
+    btn.textContent = 'Start Listening';
+    btn.classList.remove('recording');
 }
 
-async function decode() {
+function stopAndDecode() {
+    stopListening();
+
+    if (rxChunks.length > 0) {
+        runDecode();
+    }
+}
+
+function updateRxDisplay() {
+    if (!isListening) return;
+
+    drawWaveform('rx-wave');
+
+    // Show recording time
+    const totalSamples = rxChunks.reduce((s, c) => s + c.length, 0);
+    const secs = totalSamples / SAMPLE_RATE;
+    document.getElementById('rx-status').textContent = `Recording: ${secs.toFixed(1)}s / ${MAX_RECORD_SECONDS}s`;
+    document.getElementById('rx-progress').style.width = (secs / MAX_RECORD_SECONDS * 100) + '%';
+
+    // Estimate dominant frequency for display
+    if (analyser) {
+        const freqData = new Uint8Array(analyser.frequencyBinCount);
+        analyser.getByteFrequencyData(freqData);
+
+        // Find peak frequency
+        let maxIdx = 0, maxVal = 0;
+        for (let i = 0; i < freqData.length; i++) {
+            if (freqData[i] > maxVal) {
+                maxVal = freqData[i];
+                maxIdx = i;
+            }
+        }
+        const freq = maxIdx * audioCtx.sampleRate / analyser.fftSize;
+        document.getElementById('freq-display').textContent = freq > 100 ? `${Math.round(freq)} Hz` : '-- Hz';
+
+        // Signal strength
+        const avgLevel = freqData.reduce((a, b) => a + b, 0) / freqData.length;
+        document.getElementById('signal-bar').style.width = Math.min(100, avgLevel / 128 * 100) + '%';
+    }
+
+    animFrame = requestAnimationFrame(updateRxDisplay);
+}
+
+async function runDecode() {
     document.getElementById('rx-status').textContent = 'Decoding...';
-    document.getElementById('rx-decode').disabled = true;
+    document.getElementById('rx-btn').disabled = true;
 
     await new Promise(r => setTimeout(r, 50));
 
@@ -802,21 +888,122 @@ async function decode() {
     const totalLen = rxChunks.reduce((s, c) => s + c.length, 0);
     const combined = new Float32Array(totalLen);
     let offset = 0;
-    for (const chunk of rxChunks) { combined.set(chunk, offset); offset += chunk.length; }
+    for (const chunk of rxChunks) {
+        combined.set(chunk, offset);
+        offset += chunk.length;
+    }
 
-    const imgData = decodeSSTV(combined);
+    const canvas = document.getElementById('rx-canvas');
+    const ctx = canvas.getContext('2d');
 
-    if (imgData) {
-        const canvas = document.getElementById('rx-canvas');
-        canvas.getContext('2d').putImageData(imgData, 0, 0);
+    // Progress callback
+    const onProgress = (msg, pct) => {
+        document.getElementById('rx-status').textContent = msg;
+        document.getElementById('rx-progress').style.width = pct + '%';
+    };
+
+    // Live line callback - update image as we decode
+    const onLine = (lineNum, yImg, crImg, cbImg) => {
+        const imgData = ctx.createImageData(WIDTH, lineNum);
+        for (let y = 0; y < lineNum; y++) {
+            for (let x = 0; x < WIDTH; x++) {
+                const [r, g, b] = yCrCbToRgb(yImg[y][x], crImg[y][x], cbImg[y][x]);
+                const idx = (y * WIDTH + x) * 4;
+                imgData.data[idx] = r;
+                imgData.data[idx + 1] = g;
+                imgData.data[idx + 2] = b;
+                imgData.data[idx + 3] = 255;
+            }
+        }
+        ctx.putImageData(imgData, 0, 0);
         canvas.style.display = 'block';
         document.getElementById('rx-placeholder').style.display = 'none';
-        document.getElementById('rx-save').disabled = false;
-        document.getElementById('rx-status').textContent = 'Decoded!';
-    } else {
-        document.getElementById('rx-status').textContent = 'Decoding failed - not enough signal';
+    };
+
+    try {
+        const imgData = decodeSSTV(combined, onProgress, onLine);
+
+        if (imgData) {
+            ctx.putImageData(imgData, 0, 0);
+            canvas.style.display = 'block';
+            document.getElementById('rx-placeholder').style.display = 'none';
+            document.getElementById('rx-save').disabled = false;
+            document.getElementById('rx-status').textContent = 'Decoded successfully!';
+        } else {
+            document.getElementById('rx-status').textContent = 'Could not decode - try recording again';
+        }
+    } catch (err) {
+        console.error(err);
+        document.getElementById('rx-status').textContent = 'Decode error: ' + err.message;
     }
-    document.getElementById('rx-decode').disabled = false;
+
+    document.getElementById('rx-btn').disabled = false;
+}
+
+// RX: Load audio file
+document.getElementById('audio-file').onchange = async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    document.getElementById('rx-status').textContent = 'Loading audio file...';
+
+    try {
+        const arrayBuffer = await file.arrayBuffer();
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+
+        // Get audio data (convert to mono if needed)
+        let audioData;
+        if (audioBuffer.numberOfChannels > 1) {
+            audioData = new Float32Array(audioBuffer.length);
+            const ch0 = audioBuffer.getChannelData(0);
+            const ch1 = audioBuffer.getChannelData(1);
+            for (let i = 0; i < audioBuffer.length; i++) {
+                audioData[i] = (ch0[i] + ch1[i]) / 2;
+            }
+        } else {
+            audioData = audioBuffer.getChannelData(0);
+        }
+
+        // Resample if needed
+        if (audioBuffer.sampleRate !== SAMPLE_RATE) {
+            document.getElementById('rx-status').textContent = 'Resampling audio...';
+            const ratio = SAMPLE_RATE / audioBuffer.sampleRate;
+            const newLength = Math.floor(audioData.length * ratio);
+            const resampled = new Float32Array(newLength);
+            for (let i = 0; i < newLength; i++) {
+                const srcIdx = i / ratio;
+                const idx = Math.floor(srcIdx);
+                const frac = srcIdx - idx;
+                if (idx + 1 < audioData.length) {
+                    resampled[i] = audioData[idx] * (1 - frac) + audioData[idx + 1] * frac;
+                } else {
+                    resampled[i] = audioData[idx];
+                }
+            }
+            audioData = resampled;
+        }
+
+        rxChunks = [audioData];
+        document.getElementById('rx-status').textContent = `Loaded ${(audioData.length / SAMPLE_RATE).toFixed(1)}s of audio`;
+
+        // Auto-decode
+        await runDecode();
+    } catch (err) {
+        document.getElementById('rx-status').textContent = 'Error loading audio: ' + err.message;
+    }
+};
+
+function clearRx() {
+    rxChunks = [];
+    const canvas = document.getElementById('rx-canvas');
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, WIDTH, HEIGHT);
+    canvas.style.display = 'none';
+    document.getElementById('rx-placeholder').style.display = 'block';
+    document.getElementById('rx-save').disabled = true;
+    document.getElementById('rx-progress').style.width = '0%';
+    document.getElementById('rx-status').textContent = 'Cleared';
 }
 
 function saveImage() {
