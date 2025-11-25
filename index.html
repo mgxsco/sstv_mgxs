@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSTV Robot36 - Online TX/RX</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+        .tabs {
+            display: flex;
+            background: rgba(0,0,0,0.3);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .tab {
+            flex: 1;
+            padding: 1rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            border-bottom: 3px solid transparent;
+        }
+        .tab:hover { background: rgba(255,255,255,0.05); }
+        .tab.active.tx { border-color: #ff6b6b; background: rgba(255,107,107,0.1); }
+        .tab.active.rx { border-color: #4ecdc4; background: rgba(78,205,196,0.1); }
+        .tab-content { display: none; padding: 1rem; max-width: 900px; margin: 0 auto; }
+        .tab-content.active { display: block; }
+        .panel {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+        }
+        .panel h2 {
+            font-size: 0.9rem;
+            color: #8892b0;
+            margin-bottom: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .image-box {
+            width: 100%;
+            max-width: 400px;
+            aspect-ratio: 4/3;
+            background: rgba(0,0,0,0.3);
+            border: 2px dashed rgba(255,255,255,0.2);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            overflow: hidden;
+            margin: 0 auto;
+        }
+        .image-box:hover { border-color: #4ecdc4; }
+        .image-box img, .image-box canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
+        .placeholder { text-align: center; color: #8892b0; }
+        .placeholder span { font-size: 3rem; display: block; margin-bottom: 0.5rem; }
+        .controls { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 1rem; justify-content: center; }
+        button {
+            background: linear-gradient(135deg, #4ecdc4, #44a08d);
+            color: #fff;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        button:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(78,205,196,0.4); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        button.tx-btn { background: linear-gradient(135deg, #ff6b6b, #ee5a5a); }
+        button.tx-btn:hover { box-shadow: 0 5px 20px rgba(255,107,107,0.4); }
+        button.secondary { background: rgba(255,255,255,0.1); }
+        button.secondary:hover { background: rgba(255,255,255,0.2); box-shadow: none; }
+        button.recording { animation: pulse 1s infinite; }
+        @keyframes pulse { 0%,100%{ opacity:1; } 50%{ opacity:0.6; } }
+        .status {
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            background: rgba(255,255,255,0.1);
+            text-align: center;
+            margin-top: 1rem;
+        }
+        .waveform {
+            height: 80px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 8px;
+            margin-top: 1rem;
+        }
+        .waveform canvas { width: 100%; height: 100%; }
+        .progress-bar {
+            height: 6px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 3px;
+            margin-top: 1rem;
+            overflow: hidden;
+        }
+        .progress-bar .fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4ecdc4, #44a08d);
+            width: 0%;
+            transition: width 0.1s;
+        }
+        .progress-bar.tx .fill { background: linear-gradient(90deg, #ff6b6b, #ee5a5a); }
+        .freq-display {
+            font-family: 'Courier New', monospace;
+            font-size: 1.5rem;
+            color: #4ecdc4;
+            text-align: center;
+            padding: 0.5rem;
+            background: rgba(0,0,0,0.3);
+            border-radius: 8px;
+            margin-top: 1rem;
+        }
+        input[type="file"] { display: none; }
+        .info { font-size: 0.8rem; color: #8892b0; text-align: center; margin-top: 0.5rem; }
+        .spectrogram { height: 100px; background: rgba(0,0,0,0.3); border-radius: 8px; margin-top: 0.5rem; }
+        .spectrogram canvas { width: 100%; height: 100%; }
+    </style>
+</head>
+<body>
+    <div class="tabs">
+        <div class="tab tx active" onclick="switchTab('tx')">📡 Transmit (TX)</div>
+        <div class="tab rx" onclick="switchTab('rx')">📻 Receive (RX)</div>
+    </div>
+
+    <!-- TX Tab -->
+    <div id="tx-tab" class="tab-content active">
+        <div class="panel">
+            <h2>Source Image</h2>
+            <div class="image-box" id="tx-image-box" onclick="document.getElementById('fileInput').click()">
+                <div class="placeholder" id="tx-placeholder">
+                    <span>📷</span>
+                    <p>Click to upload image</p>
+                </div>
+                <canvas id="tx-canvas" style="display:none;"></canvas>
+            </div>
+            <input type="file" id="fileInput" accept="image/*">
+            <div class="controls">
+                <button class="secondary" onclick="document.getElementById('fileInput').click()">📁 Upload</button>
+                <button class="secondary" id="cameraBtn" onclick="toggleCamera()">📸 Camera</button>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2>Transmit</h2>
+            <div class="controls">
+                <button class="tx-btn" id="txBtn" onclick="startTX()" disabled>📡 Transmit Audio</button>
+                <button class="secondary" id="stopTxBtn" onclick="stopTX()" disabled>⏹ Stop</button>
+            </div>
+            <div class="waveform"><canvas id="tx-waveform"></canvas></div>
+            <div class="progress-bar tx"><div class="fill" id="tx-progress"></div></div>
+            <div class="status" id="tx-status">Upload an image to begin</div>
+        </div>
+    </div>
+
+    <!-- RX Tab -->
+    <div id="rx-tab" class="tab-content">
+        <div class="panel">
+            <h2>Receive</h2>
+            <div class="controls">
+                <button id="rxBtn" onclick="startRX()">🎙️ Start Listening</button>
+                <button class="secondary" id="stopRxBtn" onclick="stopRX()" disabled>⏹ Stop</button>
+                <button class="secondary" id="decodeBtn" onclick="decodeAudio()" disabled>🔍 Decode</button>
+            </div>
+            <div class="waveform"><canvas id="rx-waveform"></canvas></div>
+            <div class="freq-display" id="freq-display">-- Hz</div>
+            <div class="spectrogram"><canvas id="spectrogram"></canvas></div>
+            <div class="progress-bar"><div class="fill" id="rx-progress"></div></div>
+            <div class="status" id="rx-status">Click Start Listening to begin</div>
+            <div class="info" id="rx-info">Recording: 0.0s</div>
+        </div>
+
+        <div class="panel">
+            <h2>Decoded Image</h2>
+            <div class="image-box" id="rx-image-box" style="cursor:default; border-style:solid;">
+                <div class="placeholder" id="rx-placeholder">
+                    <span>📺</span>
+                    <p>Decoded image will appear here</p>
+                </div>
+                <canvas id="rx-canvas" style="display:none;" width="320" height="240"></canvas>
+            </div>
+            <div class="controls">
+                <button class="secondary" id="saveBtn" onclick="saveImage()" disabled>💾 Save Image</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // ============================================
+    // SSTV Robot36 - Pure JavaScript Implementation
+    // ============================================
+
+    const SAMPLE_RATE = 44100;
+    const WIDTH = 320;
+    const HEIGHT = 240;
+
+    // Frequencies
+    const FREQ_BLACK = 1500;
+    const FREQ_WHITE = 2300;
+    const FREQ_SYNC = 1200;
+    const FREQ_VIS_1 = 1100;
+    const FREQ_VIS_0 = 1300;
+    const LEADER_FREQ = 1900;
+    const VIS_CODE = 8;
+
+    // Timing (seconds)
+    const LEADER_DURATION = 0.300;
+    const BREAK_DURATION = 0.010;
+    const VIS_BIT_DURATION = 0.030;
+    const SYNC_DURATION = 0.009;
+    const SYNC_PORCH_DURATION = 0.003;
+    const Y_SCAN_DURATION = 0.088;
+    const SEPARATOR_DURATION = 0.0045;
+    const COLOR_PORCH_DURATION = 0.0015;
+    const COLOR_SCAN_DURATION = 0.044;
+
+    // Global state
+    let audioCtx = null;
+    let txSource = null;
+    let rxStream = null;
+    let rxProcessor = null;
+    let rxAnalyser = null;
+    let rxBuffer = [];
+    let isTxPlaying = false;
+    let isRxRecording = false;
+    let imageData = null;
+    let cameraStream = null;
+
+    // ============================================
+    // Tab Switching
+    // ============================================
+    function switchTab(tab) {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+        document.querySelector(`.tab.${tab}`).classList.add('active');
+        document.getElementById(`${tab}-tab`).classList.add('active');
+    }
+
+    // ============================================
+    // Image Loading
+    // ============================================
+    document.getElementById('fileInput').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) loadImageFile(file);
+    });
+
+    function loadImageFile(file) {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.getElementById('tx-canvas');
+            canvas.width = WIDTH;
+            canvas.height = HEIGHT;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, WIDTH, HEIGHT);
+            canvas.style.display = 'block';
+            document.getElementById('tx-placeholder').style.display = 'none';
+            imageData = ctx.getImageData(0, 0, WIDTH, HEIGHT);
+            document.getElementById('txBtn').disabled = false;
+            document.getElementById('tx-status').textContent = 'Ready to transmit';
+            if (cameraStream) toggleCamera();
+        };
+        img.src = URL.createObjectURL(file);
+    }
+
+    async function toggleCamera() {
+        const video = document.createElement('video');
+        if (cameraStream) {
+            cameraStream.getTracks().forEach(t => t.stop());
+            cameraStream = null;
+            document.getElementById('cameraBtn').textContent = '📸 Camera';
+            return;
+        }
+        try {
+            cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+            video.srcObject = cameraStream;
+            video.play();
+            document.getElementById('cameraBtn').textContent = '📷 Capture';
+            document.getElementById('cameraBtn').onclick = () => {
+                const canvas = document.getElementById('tx-canvas');
+                canvas.width = WIDTH;
+                canvas.height = HEIGHT;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0, WIDTH, HEIGHT);
+                canvas.style.display = 'block';
+                document.getElementById('tx-placeholder').style.display = 'none';
+                imageData = ctx.getImageData(0, 0, WIDTH, HEIGHT);
+                document.getElementById('txBtn').disabled = false;
+                document.getElementById('tx-status').textContent = 'Ready to transmit';
+                cameraStream.getTracks().forEach(t => t.stop());
+                cameraStream = null;
+                document.getElementById('cameraBtn').textContent = '📸 Camera';
+                document.getElementById('cameraBtn').onclick = toggleCamera;
+            };
+        } catch (err) {
+            alert('Camera error: ' + err.message);
+        }
+    }
+
+    // ============================================
+    // Color Conversion
+    // ============================================
+    function rgbToYCrCb(r, g, b) {
+        const y = 16 + 65.481 * r / 255 + 128.553 * g / 255 + 24.966 * b / 255;
+        const cr = 128 + 112.0 * r / 255 - 93.786 * g / 255 - 18.214 * b / 255;
+        const cb = 128 - 37.797 * r / 255 - 74.203 * g / 255 + 112.0 * b / 255;
+        return [Math.max(0, Math.min(255, y)), Math.max(0, Math.min(255, cr)), Math.max(0, Math.min(255, cb))];
+    }
+
+    function yCrCbToRgb(y, cr, cb) {
+        const r = 298.082 * (y - 16) / 256 + 408.583 * (cr - 128) / 256;
+        const g = 298.082 * (y - 16) / 256 - 208.120 * (cr - 128) / 256 - 100.291 * (cb - 128) / 256;
+        const b = 298.082 * (y - 16) / 256 + 516.411 * (cb - 128) / 256;
+        return [Math.max(0, Math.min(255, r)), Math.max(0, Math.min(255, g)), Math.max(0, Math.min(255, b))];
+    }
+
+    // ============================================
+    // SSTV Encoder
+    // ============================================
+    function encodeSSTV(imgData) {
+        const samples = [];
+        let phase = 0;
+
+        function addTone(freq, duration) {
+            const numSamples = Math.floor(duration * SAMPLE_RATE);
+            for (let i = 0; i < numSamples; i++) {
+                samples.push(Math.sin(phase));
+                phase += 2 * Math.PI * freq / SAMPLE_RATE;
+            }
+        }
+
+        function addScanLine(values, duration) {
+            const numSamples = Math.floor(duration * SAMPLE_RATE);
+            for (let i = 0; i < numSamples; i++) {
+                const idx = Math.floor(i / numSamples * values.length);
+                const val = values[Math.min(idx, values.length - 1)];
+                const freq = FREQ_BLACK + (val / 255) * (FREQ_WHITE - FREQ_BLACK);
+                samples.push(Math.sin(phase));
+                phase += 2 * Math.PI * freq / SAMPLE_RATE;
+            }
+        }
+
+        // Header
+        addTone(LEADER_FREQ, LEADER_DURATION);
+        addTone(FREQ_SYNC, BREAK_DURATION);
+
+        // VIS code
+        addTone(FREQ_VIS_1, VIS_BIT_DURATION); // Start bit
+        let parity = 0;
+        for (let i = 0; i < 7; i++) {
+            const bit = (VIS_CODE >> i) & 1;
+            parity ^= bit;
+            addTone(bit ? FREQ_VIS_1 : FREQ_VIS_0, VIS_BIT_DURATION);
+        }
+        addTone(parity ? FREQ_VIS_1 : FREQ_VIS_0, VIS_BIT_DURATION);
+        addTone(FREQ_VIS_0, VIS_BIT_DURATION); // Stop bit
+        addTone(FREQ_SYNC, BREAK_DURATION);
+
+        // Convert image to YCrCb
+        const ycrcb = [];
+        for (let row = 0; row < HEIGHT; row++) {
+            const yRow = [], crRow = [], cbRow = [];
+            for (let col = 0; col < WIDTH; col++) {
+                const idx = (row * WIDTH + col) * 4;
+                const [y, cr, cb] = rgbToYCrCb(imgData.data[idx], imgData.data[idx + 1], imgData.data[idx + 2]);
+                yRow.push(y);
+                crRow.push(cr);
+                cbRow.push(cb);
+            }
+            ycrcb.push({ y: yRow, cr: crRow, cb: cbRow });
+        }
+
+        // Scan lines
+        for (let line = 0; line < HEIGHT; line++) {
+            const isEven = line % 2 === 0;
+
+            // Sync
+            addTone(FREQ_SYNC, SYNC_DURATION);
+            addTone(FREQ_BLACK, SYNC_PORCH_DURATION);
+
+            // Y scan
+            addScanLine(ycrcb[line].y, Y_SCAN_DURATION);
+
+            // Separator
+            addTone(isEven ? FREQ_BLACK : FREQ_WHITE, SEPARATOR_DURATION);
+            addTone(FREQ_BLACK, COLOR_PORCH_DURATION);
+
+            // Color scan (Cr for even, Cb for odd)
+            addScanLine(isEven ? ycrcb[line].cr : ycrcb[line].cb, COLOR_SCAN_DURATION);
+        }
+
+        return new Float32Array(samples);
+    }
+
+    // ============================================
+    // SSTV Decoder
+    // ============================================
+    function decodeSSTV(audioData) {
+        // FM demodulation using zero-crossing
+        const freqs = new Float32Array(audioData.length);
+
+        // Simple frequency estimation
+        for (let i = 1; i < audioData.length; i++) {
+            // Instantaneous frequency from phase difference
+            const diff = audioData[i] - audioData[i - 1];
+            // Estimate frequency based on slope (simplified)
+            freqs[i] = 1900; // Default
+        }
+
+        // Better approach: use Goertzel or FFT on small windows
+        const windowSize = Math.floor(SAMPLE_RATE * 0.001); // 1ms windows
+        for (let i = 0; i < audioData.length - windowSize; i += windowSize / 2) {
+            const window = audioData.slice(i, i + windowSize);
+            const freq = estimateFrequency(window);
+            for (let j = 0; j < windowSize / 2 && i + j < freqs.length; j++) {
+                freqs[i + j] = freq;
+            }
+        }
+
+        // Find sync pulses
+        const syncPulses = findSyncPulses(freqs);
+
+        if (syncPulses.length < 10) {
+            console.log('Not enough sync pulses found:', syncPulses.length);
+            return null;
+        }
+
+        // Decode image
+        const yImage = new Array(HEIGHT).fill(null).map(() => new Uint8Array(WIDTH).fill(128));
+        const crImage = new Array(HEIGHT).fill(null).map(() => new Uint8Array(WIDTH).fill(128));
+        const cbImage = new Array(HEIGHT).fill(null).map(() => new Uint8Array(WIDTH).fill(128));
+
+        const lineSamples = Math.floor((SYNC_DURATION + SYNC_PORCH_DURATION + Y_SCAN_DURATION +
+            SEPARATOR_DURATION + COLOR_PORCH_DURATION + COLOR_SCAN_DURATION) * SAMPLE_RATE);
+
+        let linesDecoded = 0;
+        for (let i = 0; i < syncPulses.length && linesDecoded < HEIGHT; i++) {
+            const syncPos = syncPulses[i];
+            if (syncPos + lineSamples > freqs.length) break;
+
+            const yStart = syncPos + Math.floor((SYNC_DURATION + SYNC_PORCH_DURATION) * SAMPLE_RATE);
+            const yEnd = yStart + Math.floor(Y_SCAN_DURATION * SAMPLE_RATE);
+            const colorStart = yEnd + Math.floor((SEPARATOR_DURATION + COLOR_PORCH_DURATION) * SAMPLE_RATE);
+            const colorEnd = colorStart + Math.floor(COLOR_SCAN_DURATION * SAMPLE_RATE);
+
+            // Extract Y
+            for (let x = 0; x < WIDTH; x++) {
+                const idx = yStart + Math.floor(x / WIDTH * (yEnd - yStart));
+                if (idx < freqs.length) {
+                    yImage[linesDecoded][x] = freqToPixel(freqs[idx]);
+                }
+            }
+
+            // Extract color
+            const isEven = linesDecoded % 2 === 0;
+            const colorImg = isEven ? cbImage : crImage;
+            for (let x = 0; x < WIDTH; x++) {
+                const idx = colorStart + Math.floor(x / WIDTH * (colorEnd - colorStart));
+                if (idx < freqs.length) {
+                    colorImg[linesDecoded][x] = freqToPixel(freqs[idx]);
+                }
+            }
+
+            linesDecoded++;
+        }
+
+        console.log('Decoded', linesDecoded, 'lines');
+
+        // Interpolate missing color channels
+        for (let i = 0; i < linesDecoded; i++) {
+            const isEven = i % 2 === 0;
+            if (isEven && i > 0) {
+                crImage[i] = crImage[i - 1].slice();
+            } else if (!isEven && i > 0) {
+                cbImage[i] = cbImage[i - 1].slice();
+            }
+        }
+
+        // Convert to RGB
+        const canvas = document.getElementById('rx-canvas');
+        const ctx = canvas.getContext('2d');
+        const imgData = ctx.createImageData(WIDTH, HEIGHT);
+
+        for (let y = 0; y < HEIGHT; y++) {
+            for (let x = 0; x < WIDTH; x++) {
+                const [r, g, b] = yCrCbToRgb(yImage[y][x], crImage[y][x], cbImage[y][x]);
+                const idx = (y * WIDTH + x) * 4;
+                imgData.data[idx] = r;
+                imgData.data[idx + 1] = g;
+                imgData.data[idx + 2] = b;
+                imgData.data[idx + 3] = 255;
+            }
+        }
+
+        return imgData;
+    }
+
+    function estimateFrequency(samples) {
+        // Zero-crossing rate estimation
+        let crossings = 0;
+        for (let i = 1; i < samples.length; i++) {
+            if ((samples[i] >= 0 && samples[i - 1] < 0) || (samples[i] < 0 && samples[i - 1] >= 0)) {
+                crossings++;
+            }
+        }
+        return (crossings / 2) * SAMPLE_RATE / samples.length;
+    }
+
+    function findSyncPulses(freqs) {
+        const pulses = [];
+        const minSyncSamples = Math.floor(0.006 * SAMPLE_RATE);
+        const maxSyncSamples = Math.floor(0.015 * SAMPLE_RATE);
+
+        let inSync = false;
+        let syncStart = 0;
+
+        for (let i = 0; i < freqs.length; i++) {
+            const isSync = freqs[i] < 1350;
+
+            if (isSync && !inSync) {
+                inSync = true;
+                syncStart = i;
+            } else if (!isSync && inSync) {
+                inSync = false;
+                const duration = i - syncStart;
+                if (duration >= minSyncSamples && duration <= maxSyncSamples) {
+                    pulses.push(syncStart);
+                }
+            }
+        }
+
+        // Filter pulses by expected interval
+        if (pulses.length < 2) return pulses;
+
+        const expectedInterval = Math.floor((SYNC_DURATION + SYNC_PORCH_DURATION + Y_SCAN_DURATION +
+            SEPARATOR_DURATION + COLOR_PORCH_DURATION + COLOR_SCAN_DURATION) * SAMPLE_RATE);
+        const tolerance = Math.floor(0.01 * SAMPLE_RATE);
+
+        const filtered = [pulses[0]];
+        for (let i = 1; i < pulses.length; i++) {
+            const dist = pulses[i] - filtered[filtered.length - 1];
+            if (Math.abs(dist - expectedInterval) < tolerance || dist > expectedInterval * 0.8) {
+                filtered.push(pulses[i]);
+            }
+        }
+
+        return filtered;
+    }
+
+    function freqToPixel(freq) {
+        const val = (freq - FREQ_BLACK) / (FREQ_WHITE - FREQ_BLACK) * 255;
+        return Math.max(0, Math.min(255, Math.round(val)));
+    }
+
+    // ============================================
+    // TX Functions
+    // ============================================
+    async function startTX() {
+        if (!imageData) return;
+
+        document.getElementById('tx-status').textContent = 'Encoding...';
+        document.getElementById('txBtn').disabled = true;
+
+        // Small delay to update UI
+        await new Promise(r => setTimeout(r, 50));
+
+        const audioData = encodeSSTV(imageData);
+
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+
+        const buffer = audioCtx.createBuffer(1, audioData.length, SAMPLE_RATE);
+        buffer.getChannelData(0).set(audioData);
+
+        txSource = audioCtx.createBufferSource();
+        txSource.buffer = buffer;
+
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 2048;
+
+        txSource.connect(analyser);
+        analyser.connect(audioCtx.destination);
+
+        isTxPlaying = true;
+        document.getElementById('stopTxBtn').disabled = false;
+        document.getElementById('tx-status').textContent = 'Transmitting...';
+
+        const duration = audioData.length / SAMPLE_RATE;
+        const startTime = audioCtx.currentTime;
+
+        function updateTX() {
+            if (!isTxPlaying) return;
+
+            // Waveform
+            const canvas = document.getElementById('tx-waveform');
+            const ctx = canvas.getContext('2d');
+            canvas.width = canvas.offsetWidth * 2;
+            canvas.height = canvas.offsetHeight * 2;
+            ctx.scale(2, 2);
+
+            const data = new Uint8Array(analyser.frequencyBinCount);
+            analyser.getByteTimeDomainData(data);
+
+            ctx.fillStyle = 'rgba(0,0,0,0.3)';
+            ctx.fillRect(0, 0, canvas.offsetWidth, canvas.offsetHeight);
+
+            ctx.strokeStyle = '#ff6b6b';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+
+            const sliceWidth = canvas.offsetWidth / data.length;
+            for (let i = 0; i < data.length; i++) {
+                const y = (data[i] / 128) * canvas.offsetHeight / 2;
+                i === 0 ? ctx.moveTo(0, y) : ctx.lineTo(i * sliceWidth, y);
+            }
+            ctx.stroke();
+
+            // Progress
+            const elapsed = audioCtx.currentTime - startTime;
+            const progress = Math.min(100, (elapsed / duration) * 100);
+            document.getElementById('tx-progress').style.width = progress + '%';
+
+            requestAnimationFrame(updateTX);
+        }
+
+        txSource.onended = () => {
+            isTxPlaying = false;
+            document.getElementById('tx-status').textContent = 'Complete!';
+            document.getElementById('txBtn').disabled = false;
+            document.getElementById('stopTxBtn').disabled = true;
+            document.getElementById('tx-progress').style.width = '100%';
+        };
+
+        txSource.start();
+        updateTX();
+    }
+
+    function stopTX() {
+        if (txSource) {
+            txSource.stop();
+            txSource = null;
+        }
+        isTxPlaying = false;
+        document.getElementById('tx-status').textContent = 'Stopped';
+        document.getElementById('txBtn').disabled = false;
+        document.getElementById('stopTxBtn').disabled = true;
+    }
+
+    // ============================================
+    // RX Functions
+    // ============================================
+    async function startRX() {
+        try {
+            rxStream = await navigator.mediaDevices.getUserMedia({
+                audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+            });
+
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+
+            const source = audioCtx.createMediaStreamSource(rxStream);
+            rxAnalyser = audioCtx.createAnalyser();
+            rxAnalyser.fftSize = 4096;
+
+            rxProcessor = audioCtx.createScriptProcessor(4096, 1, 1);
+
+            source.connect(rxAnalyser);
+            rxAnalyser.connect(rxProcessor);
+            rxProcessor.connect(audioCtx.destination);
+
+            rxBuffer = [];
+            isRxRecording = true;
+
+            rxProcessor.onaudioprocess = (e) => {
+                if (!isRxRecording) return;
+                rxBuffer.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+                const totalSamples = rxBuffer.reduce((s, a) => s + a.length, 0);
+                document.getElementById('rx-info').textContent = `Recording: ${(totalSamples / SAMPLE_RATE).toFixed(1)}s`;
+            };
+
+            document.getElementById('rxBtn').disabled = true;
+            document.getElementById('rxBtn').classList.add('recording');
+            document.getElementById('stopRxBtn').disabled = false;
+            document.getElementById('rx-status').textContent = 'Listening...';
+
+            updateRX();
+
+        } catch (err) {
+            alert('Microphone error: ' + err.message);
+        }
+    }
+
+    function updateRX() {
+        if (!isRxRecording || !rxAnalyser) return;
+
+        // Waveform
+        const waveCanvas = document.getElementById('rx-waveform');
+        const waveCtx = waveCanvas.getContext('2d');
+        waveCanvas.width = waveCanvas.offsetWidth * 2;
+        waveCanvas.height = waveCanvas.offsetHeight * 2;
+        waveCtx.scale(2, 2);
+
+        const timeData = new Uint8Array(rxAnalyser.frequencyBinCount);
+        rxAnalyser.getByteTimeDomainData(timeData);
+
+        waveCtx.fillStyle = 'rgba(0,0,0,0.3)';
+        waveCtx.fillRect(0, 0, waveCanvas.offsetWidth, waveCanvas.offsetHeight);
+
+        waveCtx.strokeStyle = '#4ecdc4';
+        waveCtx.lineWidth = 2;
+        waveCtx.beginPath();
+
+        for (let i = 0; i < timeData.length; i++) {
+            const y = (timeData[i] / 128) * waveCanvas.offsetHeight / 2;
+            i === 0 ? waveCtx.moveTo(0, y) : waveCtx.lineTo(i * waveCanvas.offsetWidth / timeData.length, y);
+        }
+        waveCtx.stroke();
+
+        // Frequency display
+        const freqData = new Uint8Array(rxAnalyser.frequencyBinCount);
+        rxAnalyser.getByteFrequencyData(freqData);
+
+        const minBin = Math.floor(1000 * rxAnalyser.fftSize / SAMPLE_RATE);
+        const maxBin = Math.floor(2500 * rxAnalyser.fftSize / SAMPLE_RATE);
+
+        let maxVal = 0, maxIdx = minBin;
+        for (let i = minBin; i < maxBin; i++) {
+            if (freqData[i] > maxVal) { maxVal = freqData[i]; maxIdx = i; }
+        }
+
+        const peakFreq = Math.round(maxIdx * SAMPLE_RATE / rxAnalyser.fftSize);
+        document.getElementById('freq-display').textContent = peakFreq + ' Hz';
+
+        // Spectrogram
+        const specCanvas = document.getElementById('spectrogram');
+        const specCtx = specCanvas.getContext('2d');
+
+        if (specCanvas.width !== specCanvas.offsetWidth) {
+            specCanvas.width = specCanvas.offsetWidth;
+            specCanvas.height = specCanvas.offsetHeight;
+        }
+
+        const imgData = specCtx.getImageData(1, 0, specCanvas.width - 1, specCanvas.height);
+        specCtx.putImageData(imgData, 0, 0);
+
+        for (let i = 0; i < specCanvas.height; i++) {
+            const freqIdx = Math.floor((1 - i / specCanvas.height) * (maxBin - minBin) + minBin);
+            const val = freqData[freqIdx];
+            const hue = 180 - val * 0.7;
+            specCtx.fillStyle = `hsl(${hue}, 80%, ${val / 5}%)`;
+            specCtx.fillRect(specCanvas.width - 1, i, 1, 1);
+        }
+
+        requestAnimationFrame(updateRX);
+    }
+
+    function stopRX() {
+        isRxRecording = false;
+        if (rxStream) {
+            rxStream.getTracks().forEach(t => t.stop());
+            rxStream = null;
+        }
+        if (rxProcessor) {
+            rxProcessor.disconnect();
+            rxProcessor = null;
+        }
+
+        document.getElementById('rxBtn').disabled = false;
+        document.getElementById('rxBtn').classList.remove('recording');
+        document.getElementById('stopRxBtn').disabled = true;
+        document.getElementById('decodeBtn').disabled = rxBuffer.length === 0 ? true : false;
+        document.getElementById('rx-status').textContent = 'Stopped - Ready to decode';
+    }
+
+    async function decodeAudio() {
+        if (rxBuffer.length === 0) return;
+
+        document.getElementById('rx-status').textContent = 'Decoding...';
+        document.getElementById('decodeBtn').disabled = true;
+
+        await new Promise(r => setTimeout(r, 50));
+
+        // Combine buffer
+        const totalLength = rxBuffer.reduce((s, a) => s + a.length, 0);
+        const combined = new Float32Array(totalLength);
+        let offset = 0;
+        for (const chunk of rxBuffer) {
+            combined.set(chunk, offset);
+            offset += chunk.length;
+        }
+
+        const imgData = decodeSSTV(combined);
+
+        if (imgData) {
+            const canvas = document.getElementById('rx-canvas');
+            const ctx = canvas.getContext('2d');
+            ctx.putImageData(imgData, 0, 0);
+            canvas.style.display = 'block';
+            document.getElementById('rx-placeholder').style.display = 'none';
+            document.getElementById('saveBtn').disabled = false;
+            document.getElementById('rx-status').textContent = 'Decoded!';
+        } else {
+            document.getElementById('rx-status').textContent = 'Decoding failed - try again';
+        }
+
+        document.getElementById('decodeBtn').disabled = false;
+    }
+
+    function saveImage() {
+        const canvas = document.getElementById('rx-canvas');
+        const link = document.createElement('a');
+        link.download = 'sstv_decoded_' + Date.now() + '.png';
+        link.href = canvas.toDataURL();
+        link.click();
+    }
+    </script>
+</body>
+</html>
