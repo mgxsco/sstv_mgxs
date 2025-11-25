@@ -12,60 +12,26 @@
             min-height: 100vh;
             color: #fff;
         }
-        .tabs {
-            display: flex;
-            background: rgba(0,0,0,0.3);
-        }
-        .tab {
-            flex: 1;
-            padding: 1rem;
-            text-align: center;
-            cursor: pointer;
-            border-bottom: 3px solid transparent;
-        }
+        .tabs { display: flex; background: rgba(0,0,0,0.3); }
+        .tab { flex: 1; padding: 1rem; text-align: center; cursor: pointer; border-bottom: 3px solid transparent; }
         .tab:hover { background: rgba(255,255,255,0.05); }
         .tab.active { border-color: #4ecdc4; background: rgba(78,205,196,0.1); }
         .content { display: none; padding: 1rem; max-width: 800px; margin: 0 auto; }
         .content.active { display: block; }
-        .panel {
-            background: rgba(255,255,255,0.05);
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 12px;
-            padding: 1.5rem;
-            margin-bottom: 1rem;
-        }
+        .panel { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem; }
         .panel h2 { font-size: 0.9rem; color: #8892b0; margin-bottom: 1rem; text-transform: uppercase; }
-        .image-box {
-            width: 320px;
-            height: 240px;
-            background: #000;
-            border: 2px solid rgba(255,255,255,0.2);
-            border-radius: 8px;
-            margin: 0 auto;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-            cursor: pointer;
-        }
-        .image-box img, .image-box canvas { max-width: 100%; max-height: 100%; }
+        .image-box { width: 320px; height: 240px; background: #000; border: 2px solid rgba(255,255,255,0.2); border-radius: 8px; margin: 0 auto; display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: pointer; }
+        .image-box canvas { max-width: 100%; max-height: 100%; }
         .placeholder { color: #8892b0; text-align: center; }
         .controls { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 1rem; justify-content: center; }
-        button {
-            background: #4ecdc4;
-            color: #fff;
-            border: none;
-            padding: 0.75rem 1.5rem;
-            border-radius: 8px;
-            cursor: pointer;
-        }
+        button { background: #4ecdc4; color: #fff; border: none; padding: 0.75rem 1.5rem; border-radius: 8px; cursor: pointer; font-size: 1rem; }
         button:hover { background: #3dbdb5; }
         button:disabled { opacity: 0.5; cursor: not-allowed; }
         button.secondary { background: rgba(255,255,255,0.1); }
-        .status { text-align: center; margin-top: 1rem; color: #8892b0; }
+        .status { text-align: center; margin-top: 1rem; color: #8892b0; min-height: 1.5em; }
         .waveform { height: 60px; background: #000; border-radius: 8px; margin-top: 1rem; }
-        .waveform canvas { width: 100%; height: 100%; }
-        .progress { height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; margin-top: 0.5rem; }
+        .waveform canvas { width: 100%; height: 100%; display: block; }
+        .progress { height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; margin-top: 0.5rem; overflow: hidden; }
         .progress-fill { height: 100%; background: #4ecdc4; width: 0%; transition: width 0.1s; }
         input[type="file"] { display: none; }
     </style>
@@ -123,217 +89,767 @@
         </div>
     </div>
 
-    <script>
-        const API = window.location.origin;
-        let audioCtx, txSource, rxStream, rxChunks = [], isRecording = false, analyser;
+<script>
+// ============================================
+// SSTV Robot36 - JavaScript Implementation
+// Ported from Python encoder/decoder
+// ============================================
 
-        function showTab(id) {
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.content').forEach(c => c.classList.remove('active'));
-            document.querySelector(`.tab:nth-child(${id === 'tx' ? 1 : 2})`).classList.add('active');
-            document.getElementById(id).classList.add('active');
+const SAMPLE_RATE = 44100;
+const WIDTH = 320;
+const HEIGHT = 240;
+
+// Frequencies (Hz)
+const FREQ_BLACK = 1500;
+const FREQ_WHITE = 2300;
+const FREQ_SYNC = 1200;
+const FREQ_VIS_1 = 1100;
+const FREQ_VIS_0 = 1300;
+const LEADER_FREQ = 1900;
+const VIS_CODE = 8;
+
+// Timing (seconds)
+const LEADER_DURATION = 0.300;
+const BREAK_DURATION = 0.010;
+const VIS_BIT_DURATION = 0.030;
+const SYNC_DURATION = 0.009;
+const SYNC_PORCH_DURATION = 0.003;
+const Y_SCAN_DURATION = 0.088;
+const SEPARATOR_DURATION = 0.0045;
+const COLOR_PORCH_DURATION = 0.0015;
+const COLOR_SCAN_DURATION = 0.044;
+
+const LINE_DURATION = SYNC_DURATION + SYNC_PORCH_DURATION + Y_SCAN_DURATION +
+                      SEPARATOR_DURATION + COLOR_PORCH_DURATION + COLOR_SCAN_DURATION;
+
+// ============================================
+// Color Conversion (matches Python exactly)
+// ============================================
+function rgbToYCrCb(r, g, b) {
+    const y = 16 + 65.481 * r / 255 + 128.553 * g / 255 + 24.966 * b / 255;
+    const cr = 128 + 112.0 * r / 255 - 93.786 * g / 255 - 18.214 * b / 255;
+    const cb = 128 - 37.797 * r / 255 - 74.203 * g / 255 + 112.0 * b / 255;
+    return [
+        Math.max(0, Math.min(255, Math.round(y))),
+        Math.max(0, Math.min(255, Math.round(cr))),
+        Math.max(0, Math.min(255, Math.round(cb)))
+    ];
+}
+
+function yCrCbToRgb(y, cr, cb) {
+    const r = 298.082 * (y - 16) / 256 + 408.583 * (cr - 128) / 256;
+    const g = 298.082 * (y - 16) / 256 - 208.120 * (cr - 128) / 256 - 100.291 * (cb - 128) / 256;
+    const b = 298.082 * (y - 16) / 256 + 516.411 * (cb - 128) / 256;
+    return [
+        Math.max(0, Math.min(255, Math.round(r))),
+        Math.max(0, Math.min(255, Math.round(g))),
+        Math.max(0, Math.min(255, Math.round(b)))
+    ];
+}
+
+function valueToFreq(value) {
+    return FREQ_BLACK + (value / 255) * (FREQ_WHITE - FREQ_BLACK);
+}
+
+function freqToValue(freq) {
+    const val = (freq - FREQ_BLACK) / (FREQ_WHITE - FREQ_BLACK) * 255;
+    return Math.max(0, Math.min(255, Math.round(val)));
+}
+
+// ============================================
+// ENCODER (matches Python exactly)
+// ============================================
+function encodeSSTV(imageData) {
+    const samples = [];
+    let phase = 0;
+
+    // Generate tone with phase continuity
+    function addTone(freq, duration) {
+        const numSamples = Math.floor(duration * SAMPLE_RATE);
+        for (let i = 0; i < numSamples; i++) {
+            samples.push(Math.sin(phase));
+            phase += 2 * Math.PI * freq / SAMPLE_RATE;
+        }
+    }
+
+    // Generate FM signal with phase continuity
+    function addFM(values, duration) {
+        const numSamples = Math.floor(duration * SAMPLE_RATE);
+        for (let i = 0; i < numSamples; i++) {
+            const idx = Math.floor(i / numSamples * values.length);
+            const val = values[Math.min(idx, values.length - 1)];
+            const freq = valueToFreq(val);
+            samples.push(Math.sin(phase));
+            phase += 2 * Math.PI * freq / SAMPLE_RATE;
+        }
+    }
+
+    // Convert image to YCrCb
+    const ycrcb = [];
+    for (let row = 0; row < HEIGHT; row++) {
+        const yRow = [], crRow = [], cbRow = [];
+        for (let col = 0; col < WIDTH; col++) {
+            const idx = (row * WIDTH + col) * 4;
+            const [y, cr, cb] = rgbToYCrCb(
+                imageData.data[idx],
+                imageData.data[idx + 1],
+                imageData.data[idx + 2]
+            );
+            yRow.push(y);
+            crRow.push(cr);
+            cbRow.push(cb);
+        }
+        ycrcb.push({ y: yRow, cr: crRow, cb: cbRow });
+    }
+
+    // Header: Leader tone (1900 Hz, 300ms)
+    addTone(LEADER_FREQ, LEADER_DURATION);
+
+    // Break (1200 Hz, 10ms)
+    addTone(FREQ_SYNC, BREAK_DURATION);
+
+    // VIS code
+    addTone(FREQ_VIS_1, VIS_BIT_DURATION); // Start bit
+    let parity = 0;
+    for (let i = 0; i < 7; i++) {
+        const bit = (VIS_CODE >> i) & 1;
+        parity ^= bit;
+        addTone(bit ? FREQ_VIS_1 : FREQ_VIS_0, VIS_BIT_DURATION);
+    }
+    addTone(parity ? FREQ_VIS_1 : FREQ_VIS_0, VIS_BIT_DURATION); // Parity
+    addTone(FREQ_VIS_0, VIS_BIT_DURATION); // Stop bit
+
+    // Break after VIS
+    addTone(FREQ_SYNC, BREAK_DURATION);
+
+    // Scan lines
+    for (let line = 0; line < HEIGHT; line++) {
+        const isEven = line % 2 === 0;
+
+        // Sync pulse (1200 Hz, 9ms)
+        addTone(FREQ_SYNC, SYNC_DURATION);
+
+        // Sync porch (1500 Hz, 3ms)
+        addTone(FREQ_BLACK, SYNC_PORCH_DURATION);
+
+        // Y scan (88ms)
+        addFM(ycrcb[line].y, Y_SCAN_DURATION);
+
+        // Separator (even: 1500Hz, odd: 2300Hz)
+        addTone(isEven ? FREQ_BLACK : FREQ_WHITE, SEPARATOR_DURATION);
+
+        // Color porch (1500 Hz, 1.5ms)
+        addTone(FREQ_BLACK, COLOR_PORCH_DURATION);
+
+        // Color scan (44ms) - Even: Cr, Odd: Cb
+        addFM(isEven ? ycrcb[line].cr : ycrcb[line].cb, COLOR_SCAN_DURATION);
+    }
+
+    // Normalize
+    const audio = new Float32Array(samples.length);
+    for (let i = 0; i < samples.length; i++) {
+        audio[i] = samples[i] * 0.9;
+    }
+    return audio;
+}
+
+// ============================================
+// DECODER (matches Python exactly)
+// ============================================
+
+// Butterworth filter coefficients (pre-computed for efficiency)
+function butterBandpass(signal, lowFreq, highFreq, order = 5) {
+    // Simple IIR bandpass using biquad cascade approximation
+    const nyquist = SAMPLE_RATE / 2;
+    const low = lowFreq / nyquist;
+    const high = highFreq / nyquist;
+    const bw = high - low;
+    const center = (high + low) / 2;
+
+    // Use multiple passes of a simple bandpass for better filtering
+    let filtered = new Float32Array(signal);
+    for (let pass = 0; pass < order; pass++) {
+        filtered = simpleBandpass(filtered, lowFreq, highFreq);
+    }
+    return filtered;
+}
+
+function simpleBandpass(signal, lowFreq, highFreq) {
+    // FIR bandpass filter
+    const n = 127; // Filter order
+    const h = new Float32Array(n);
+    const fc1 = lowFreq / SAMPLE_RATE;
+    const fc2 = highFreq / SAMPLE_RATE;
+
+    for (let i = 0; i < n; i++) {
+        const x = i - (n - 1) / 2;
+        if (x === 0) {
+            h[i] = 2 * (fc2 - fc1);
+        } else {
+            h[i] = (Math.sin(2 * Math.PI * fc2 * x) - Math.sin(2 * Math.PI * fc1 * x)) / (Math.PI * x);
+        }
+        // Hamming window
+        h[i] *= 0.54 - 0.46 * Math.cos(2 * Math.PI * i / (n - 1));
+    }
+
+    // Convolve
+    const filtered = new Float32Array(signal.length);
+    const halfN = Math.floor(n / 2);
+    for (let i = 0; i < signal.length; i++) {
+        let sum = 0;
+        for (let j = 0; j < n; j++) {
+            const idx = i - halfN + j;
+            if (idx >= 0 && idx < signal.length) {
+                sum += signal[idx] * h[j];
+            }
+        }
+        filtered[i] = sum;
+    }
+    return filtered;
+}
+
+function lowpassFilter(signal, cutoff) {
+    const n = 63;
+    const h = new Float32Array(n);
+    const fc = cutoff / SAMPLE_RATE;
+
+    for (let i = 0; i < n; i++) {
+        const x = i - (n - 1) / 2;
+        if (x === 0) {
+            h[i] = 2 * fc;
+        } else {
+            h[i] = Math.sin(2 * Math.PI * fc * x) / (Math.PI * x);
+        }
+        h[i] *= 0.54 - 0.46 * Math.cos(2 * Math.PI * i / (n - 1));
+    }
+
+    const filtered = new Float32Array(signal.length);
+    const halfN = Math.floor(n / 2);
+    for (let i = 0; i < signal.length; i++) {
+        let sum = 0;
+        for (let j = 0; j < n; j++) {
+            const idx = i - halfN + j;
+            if (idx >= 0 && idx < signal.length) {
+                sum += signal[idx] * h[j];
+            }
+        }
+        filtered[i] = sum;
+    }
+    return filtered;
+}
+
+// Hilbert transform using FFT
+function hilbert(signal) {
+    const n = signal.length;
+
+    // Zero-pad to power of 2
+    let fftSize = 1;
+    while (fftSize < n) fftSize *= 2;
+
+    // Compute FFT
+    const real = new Float32Array(fftSize);
+    const imag = new Float32Array(fftSize);
+    for (let i = 0; i < n; i++) real[i] = signal[i];
+
+    fft(real, imag);
+
+    // Apply Hilbert transform in frequency domain
+    // H[0] = 1, H[n/2] = 1, H[1..n/2-1] = 2, H[n/2+1..n-1] = 0
+    for (let i = 1; i < fftSize / 2; i++) {
+        real[i] *= 2;
+        imag[i] *= 2;
+    }
+    for (let i = fftSize / 2 + 1; i < fftSize; i++) {
+        real[i] = 0;
+        imag[i] = 0;
+    }
+
+    // Inverse FFT
+    ifft(real, imag);
+
+    // Return analytic signal (original length)
+    return {
+        real: real.slice(0, n),
+        imag: imag.slice(0, n)
+    };
+}
+
+// In-place FFT
+function fft(real, imag) {
+    const n = real.length;
+    if (n <= 1) return;
+
+    // Bit reversal
+    let j = 0;
+    for (let i = 0; i < n - 1; i++) {
+        if (i < j) {
+            [real[i], real[j]] = [real[j], real[i]];
+            [imag[i], imag[j]] = [imag[j], imag[i]];
+        }
+        let k = n / 2;
+        while (k <= j) { j -= k; k /= 2; }
+        j += k;
+    }
+
+    // Cooley-Tukey FFT
+    for (let len = 2; len <= n; len *= 2) {
+        const halfLen = len / 2;
+        const angle = -2 * Math.PI / len;
+        for (let i = 0; i < n; i += len) {
+            for (let k = 0; k < halfLen; k++) {
+                const cos = Math.cos(angle * k);
+                const sin = Math.sin(angle * k);
+                const tr = real[i + k + halfLen] * cos - imag[i + k + halfLen] * sin;
+                const ti = real[i + k + halfLen] * sin + imag[i + k + halfLen] * cos;
+                real[i + k + halfLen] = real[i + k] - tr;
+                imag[i + k + halfLen] = imag[i + k] - ti;
+                real[i + k] += tr;
+                imag[i + k] += ti;
+            }
+        }
+    }
+}
+
+function ifft(real, imag) {
+    const n = real.length;
+    // Conjugate
+    for (let i = 0; i < n; i++) imag[i] = -imag[i];
+    // Forward FFT
+    fft(real, imag);
+    // Conjugate and scale
+    for (let i = 0; i < n; i++) {
+        real[i] /= n;
+        imag[i] = -imag[i] / n;
+    }
+}
+
+function demodulateFFM(signal) {
+    console.log('Bandpass filtering...');
+    const filtered = butterBandpass(signal, 1000, 2500, 2);
+
+    console.log('Computing Hilbert transform...');
+    const analytic = hilbert(filtered);
+
+    console.log('Extracting instantaneous frequency...');
+    const freqs = new Float32Array(signal.length);
+    let prevPhase = 0;
+
+    for (let i = 0; i < signal.length; i++) {
+        const phase = Math.atan2(analytic.imag[i], analytic.real[i]);
+        let phaseDiff = phase - prevPhase;
+
+        // Unwrap phase
+        while (phaseDiff > Math.PI) phaseDiff -= 2 * Math.PI;
+        while (phaseDiff < -Math.PI) phaseDiff += 2 * Math.PI;
+
+        freqs[i] = Math.abs(phaseDiff * SAMPLE_RATE / (2 * Math.PI));
+        prevPhase = phase;
+    }
+
+    console.log('Smoothing frequencies...');
+    const smoothed = lowpassFilter(freqs, 800);
+
+    // Clip to valid range
+    for (let i = 0; i < smoothed.length; i++) {
+        smoothed[i] = Math.max(1100, Math.min(2400, smoothed[i]));
+    }
+
+    return smoothed;
+}
+
+function findSyncPulses(freqs) {
+    const pulses = [];
+    const minSamples = Math.floor(0.006 * SAMPLE_RATE);
+    const maxSamples = Math.floor(0.015 * SAMPLE_RATE);
+
+    let inSync = false;
+    let syncStart = 0;
+
+    for (let i = 0; i < freqs.length; i++) {
+        const isSync = freqs[i] < 1350 && freqs[i] > 1100;
+
+        if (isSync && !inSync) {
+            inSync = true;
+            syncStart = i;
+        } else if (!isSync && inSync) {
+            inSync = false;
+            const duration = i - syncStart;
+            if (duration >= minSamples && duration <= maxSamples) {
+                pulses.push(syncStart);
+            }
+        }
+    }
+    return pulses;
+}
+
+function filterSyncPulses(pulses) {
+    if (pulses.length < 2) return pulses;
+
+    const expectedInterval = Math.floor(LINE_DURATION * SAMPLE_RATE);
+    const tolerance = Math.floor(0.01 * SAMPLE_RATE);
+
+    const filtered = [pulses[0]];
+    for (let i = 1; i < pulses.length; i++) {
+        const dist = pulses[i] - filtered[filtered.length - 1];
+        if (Math.abs(dist - expectedInterval) < tolerance || dist > expectedInterval * 0.8) {
+            filtered.push(pulses[i]);
+        }
+    }
+    return filtered;
+}
+
+function detectHeaderEnd(freqs) {
+    const windowSamples = Math.floor(0.05 * SAMPLE_RATE);
+
+    // Find leader tone (1900 Hz)
+    let leaderStart = null;
+    for (let i = 0; i < freqs.length - windowSamples; i += Math.floor(windowSamples / 2)) {
+        let count = 0;
+        for (let j = 0; j < windowSamples; j++) {
+            if (Math.abs(freqs[i + j] - LEADER_FREQ) < 150) count++;
+        }
+        if (count / windowSamples > 0.6) {
+            leaderStart = i;
+            break;
+        }
+    }
+
+    if (leaderStart === null) {
+        console.log('Warning: Could not detect leader tone');
+        return 0;
+    }
+
+    // Find end of leader
+    let leaderEnd = leaderStart;
+    for (let i = leaderStart + windowSamples; i < freqs.length; i++) {
+        if (freqs[i] < 1400) {
+            leaderEnd = i;
+            break;
+        }
+    }
+
+    // Skip header (break + VIS + break)
+    const headerDuration = BREAK_DURATION + 10 * VIS_BIT_DURATION + BREAK_DURATION;
+    return Math.min(leaderEnd + Math.floor(headerDuration * SAMPLE_RATE), freqs.length - 1);
+}
+
+function decodeSSTV(audio) {
+    console.log('Decoding', audio.length, 'samples...');
+
+    // FM demodulation
+    const freqs = demodulateFFM(audio);
+
+    // Detect header
+    console.log('Detecting header...');
+    const imageStart = detectHeaderEnd(freqs);
+    console.log('Image starts at sample', imageStart);
+
+    // Find sync pulses
+    console.log('Finding sync pulses...');
+    let syncPulses = findSyncPulses(freqs.slice(imageStart));
+    syncPulses = syncPulses.map(s => s + imageStart);
+    console.log('Found', syncPulses.length, 'potential sync pulses');
+
+    syncPulses = filterSyncPulses(syncPulses);
+    console.log('Filtered to', syncPulses.length, 'line syncs');
+
+    if (syncPulses.length < 10) {
+        console.log('Not enough sync pulses');
+        return null;
+    }
+
+    // Initialize image arrays (Cr/Cb at 128 = neutral)
+    const yImage = new Array(HEIGHT).fill(null).map(() => new Uint8Array(WIDTH).fill(0));
+    const crImage = new Array(HEIGHT).fill(null).map(() => new Uint8Array(WIDTH).fill(128));
+    const cbImage = new Array(HEIGHT).fill(null).map(() => new Uint8Array(WIDTH).fill(128));
+
+    const lineSamples = Math.floor(LINE_DURATION * SAMPLE_RATE);
+    const syncSamples = Math.floor(SYNC_DURATION * SAMPLE_RATE);
+    const porchSamples = Math.floor(SYNC_PORCH_DURATION * SAMPLE_RATE);
+    const ySamples = Math.floor(Y_SCAN_DURATION * SAMPLE_RATE);
+    const sepSamples = Math.floor(SEPARATOR_DURATION * SAMPLE_RATE);
+    const colorPorchSamples = Math.floor(COLOR_PORCH_DURATION * SAMPLE_RATE);
+    const colorSamples = Math.floor(COLOR_SCAN_DURATION * SAMPLE_RATE);
+
+    let linesDecoded = 0;
+
+    for (let i = 0; i < syncPulses.length && linesDecoded < HEIGHT; i++) {
+        const syncPos = syncPulses[i];
+        if (syncPos + lineSamples > freqs.length) break;
+
+        // Extract Y data
+        const yStart = syncPos + syncSamples + porchSamples;
+        const yEnd = yStart + ySamples;
+
+        for (let x = 0; x < WIDTH; x++) {
+            const idx = yStart + Math.floor(x / WIDTH * (yEnd - yStart));
+            if (idx < freqs.length) {
+                yImage[linesDecoded][x] = freqToValue(freqs[idx]);
+            }
         }
 
-        // TX: Load image
-        document.getElementById('file').onchange = e => {
-            const file = e.target.files[0];
-            if (!file) return;
-            const img = new Image();
-            img.onload = () => {
-                const canvas = document.getElementById('tx-canvas');
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, 320, 240);
-                canvas.style.display = 'block';
-                document.getElementById('tx-placeholder').style.display = 'none';
-                document.getElementById('tx-btn').disabled = false;
-                document.getElementById('tx-status').textContent = 'Ready to transmit';
-            };
-            img.src = URL.createObjectURL(file);
+        // Extract color data
+        const colorStart = yEnd + sepSamples + colorPorchSamples;
+        const colorEnd = colorStart + colorSamples;
+        const isEven = linesDecoded % 2 === 0;
+        const colorImg = isEven ? cbImage : crImage; // SWAPPED to match Python fix
+
+        for (let x = 0; x < WIDTH; x++) {
+            const idx = colorStart + Math.floor(x / WIDTH * (colorEnd - colorStart));
+            if (idx < freqs.length) {
+                colorImg[linesDecoded][x] = freqToValue(freqs[idx]);
+            }
+        }
+
+        linesDecoded++;
+    }
+
+    console.log('Decoded', linesDecoded, 'lines');
+
+    // Interpolate missing color channels (matches Python exactly)
+    for (let i = 0; i < linesDecoded; i++) {
+        const isEven = i % 2 === 0;
+        if (isEven) {
+            // Even line has Cb, need Cr
+            if (i > 0) {
+                crImage[i] = crImage[i - 1].slice();
+            } else if (i + 1 < linesDecoded) {
+                crImage[i] = crImage[i + 1].slice();
+            }
+        } else {
+            // Odd line has Cr, need Cb
+            if (i > 0) {
+                cbImage[i] = cbImage[i - 1].slice();
+            } else if (i + 1 < linesDecoded) {
+                cbImage[i] = cbImage[i + 1].slice();
+            }
+        }
+    }
+
+    // Second pass: average interpolation
+    for (let i = 1; i < linesDecoded - 1; i++) {
+        const isEven = i % 2 === 0;
+        if (isEven) {
+            for (let x = 0; x < WIDTH; x++) {
+                crImage[i][x] = Math.floor((crImage[i - 1][x] + crImage[i + 1][x]) / 2);
+            }
+        } else {
+            for (let x = 0; x < WIDTH; x++) {
+                cbImage[i][x] = Math.floor((cbImage[i - 1][x] + cbImage[i + 1][x]) / 2);
+            }
+        }
+    }
+
+    // Convert to RGB
+    const canvas = document.getElementById('rx-canvas');
+    const ctx = canvas.getContext('2d');
+    const imgData = ctx.createImageData(WIDTH, HEIGHT);
+
+    for (let y = 0; y < HEIGHT; y++) {
+        for (let x = 0; x < WIDTH; x++) {
+            const [r, g, b] = yCrCbToRgb(yImage[y][x], crImage[y][x], cbImage[y][x]);
+            const idx = (y * WIDTH + x) * 4;
+            imgData.data[idx] = r;
+            imgData.data[idx + 1] = g;
+            imgData.data[idx + 2] = b;
+            imgData.data[idx + 3] = 255;
+        }
+    }
+
+    return imgData;
+}
+
+// ============================================
+// UI Code
+// ============================================
+let audioCtx, txSource, rxStream, rxChunks = [], isRecording = false, analyser, animFrame;
+
+function showTab(id) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.content').forEach(c => c.classList.remove('active'));
+    document.querySelector(`.tab:nth-child(${id === 'tx' ? 1 : 2})`).classList.add('active');
+    document.getElementById(id).classList.add('active');
+}
+
+// TX: Load image
+document.getElementById('file').onchange = e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const img = new Image();
+    img.onload = () => {
+        const canvas = document.getElementById('tx-canvas');
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, 320, 240);
+        canvas.style.display = 'block';
+        document.getElementById('tx-placeholder').style.display = 'none';
+        document.getElementById('tx-btn').disabled = false;
+        document.getElementById('tx-status').textContent = 'Ready to transmit';
+    };
+    img.src = URL.createObjectURL(file);
+};
+
+async function transmit() {
+    document.getElementById('tx-status').textContent = 'Encoding...';
+    document.getElementById('tx-btn').disabled = true;
+
+    await new Promise(r => setTimeout(r, 50));
+
+    const canvas = document.getElementById('tx-canvas');
+    const ctx = canvas.getContext('2d');
+    const imageData = ctx.getImageData(0, 0, WIDTH, HEIGHT);
+
+    const audio = encodeSSTV(imageData);
+
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+    const buffer = audioCtx.createBuffer(1, audio.length, SAMPLE_RATE);
+    buffer.getChannelData(0).set(audio);
+
+    txSource = audioCtx.createBufferSource();
+    txSource.buffer = buffer;
+    analyser = audioCtx.createAnalyser();
+    txSource.connect(analyser);
+    analyser.connect(audioCtx.destination);
+
+    document.getElementById('tx-stop').disabled = false;
+    document.getElementById('tx-status').textContent = 'Transmitting...';
+
+    const startTime = audioCtx.currentTime;
+    const duration = buffer.duration;
+
+    function update() {
+        if (!txSource) return;
+        const elapsed = audioCtx.currentTime - startTime;
+        document.getElementById('tx-progress').style.width = Math.min(100, elapsed / duration * 100) + '%';
+        drawWaveform('tx-wave');
+        if (elapsed < duration) animFrame = requestAnimationFrame(update);
+    }
+
+    txSource.onended = () => {
+        document.getElementById('tx-status').textContent = 'Done!';
+        document.getElementById('tx-btn').disabled = false;
+        document.getElementById('tx-stop').disabled = true;
+        document.getElementById('tx-progress').style.width = '100%';
+        txSource = null;
+    };
+
+    txSource.start();
+    update();
+}
+
+function stopTx() {
+    if (txSource) { txSource.stop(); txSource = null; }
+    if (animFrame) cancelAnimationFrame(animFrame);
+    document.getElementById('tx-btn').disabled = false;
+    document.getElementById('tx-stop').disabled = true;
+    document.getElementById('tx-status').textContent = 'Stopped';
+}
+
+async function startRx() {
+    try {
+        rxStream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+        });
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+        const source = audioCtx.createMediaStreamSource(rxStream);
+        analyser = audioCtx.createAnalyser();
+        const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+
+        source.connect(analyser);
+        analyser.connect(processor);
+        processor.connect(audioCtx.destination);
+
+        rxChunks = [];
+        isRecording = true;
+
+        processor.onaudioprocess = e => {
+            if (isRecording) rxChunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
         };
 
-        // TX: Encode and play
-        async function transmit() {
-            document.getElementById('tx-status').textContent = 'Encoding...';
-            document.getElementById('tx-btn').disabled = true;
+        document.getElementById('rx-btn').disabled = true;
+        document.getElementById('rx-stop').disabled = false;
+        document.getElementById('rx-status').textContent = 'Recording...';
 
-            const canvas = document.getElementById('tx-canvas');
-            const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
-            const formData = new FormData();
-            formData.append('image', blob);
-
-            try {
-                const res = await fetch(API + '/api/encode', { method: 'POST', body: formData });
-                const data = await res.json();
-                if (!data.success) throw new Error(data.error);
-
-                // Decode base64 WAV and play
-                const wavBytes = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0));
-                audioCtx = new AudioContext({ sampleRate: data.sample_rate });
-                const audioBuffer = await audioCtx.decodeAudioData(wavBytes.buffer);
-
-                txSource = audioCtx.createBufferSource();
-                txSource.buffer = audioBuffer;
-                analyser = audioCtx.createAnalyser();
-                txSource.connect(analyser);
-                analyser.connect(audioCtx.destination);
-
-                document.getElementById('tx-stop').disabled = false;
-                document.getElementById('tx-status').textContent = 'Transmitting...';
-
-                const startTime = audioCtx.currentTime;
-                const duration = audioBuffer.duration;
-
-                function update() {
-                    if (!txSource) return;
-                    const elapsed = audioCtx.currentTime - startTime;
-                    document.getElementById('tx-progress').style.width = Math.min(100, elapsed / duration * 100) + '%';
-                    drawWaveform('tx-wave', analyser);
-                    if (elapsed < duration) requestAnimationFrame(update);
-                }
-
-                txSource.onended = () => {
-                    document.getElementById('tx-status').textContent = 'Done!';
-                    document.getElementById('tx-btn').disabled = false;
-                    document.getElementById('tx-stop').disabled = true;
-                    document.getElementById('tx-progress').style.width = '100%';
-                    txSource = null;
-                };
-
-                txSource.start();
-                update();
-            } catch (err) {
-                document.getElementById('tx-status').textContent = 'Error: ' + err.message;
-                document.getElementById('tx-btn').disabled = false;
-            }
+        function updateRx() {
+            if (!isRecording) return;
+            drawWaveform('rx-wave');
+            const secs = rxChunks.reduce((s, c) => s + c.length, 0) / SAMPLE_RATE;
+            document.getElementById('rx-status').textContent = `Recording: ${secs.toFixed(1)}s`;
+            animFrame = requestAnimationFrame(updateRx);
         }
+        updateRx();
+    } catch (err) {
+        document.getElementById('rx-status').textContent = 'Mic error: ' + err.message;
+    }
+}
 
-        function stopTx() {
-            if (txSource) { txSource.stop(); txSource = null; }
-            document.getElementById('tx-btn').disabled = false;
-            document.getElementById('tx-stop').disabled = true;
-            document.getElementById('tx-status').textContent = 'Stopped';
-        }
+function stopRx() {
+    isRecording = false;
+    if (rxStream) { rxStream.getTracks().forEach(t => t.stop()); rxStream = null; }
+    if (animFrame) cancelAnimationFrame(animFrame);
+    document.getElementById('rx-btn').disabled = false;
+    document.getElementById('rx-stop').disabled = true;
+    document.getElementById('rx-decode').disabled = rxChunks.length === 0;
+    document.getElementById('rx-status').textContent = 'Ready to decode';
+}
 
-        // RX: Record audio
-        async function startRx() {
-            try {
-                rxStream = await navigator.mediaDevices.getUserMedia({
-                    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
-                });
-                audioCtx = new AudioContext({ sampleRate: 44100 });
-                const source = audioCtx.createMediaStreamSource(rxStream);
-                analyser = audioCtx.createAnalyser();
-                const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+async function decode() {
+    document.getElementById('rx-status').textContent = 'Decoding...';
+    document.getElementById('rx-decode').disabled = true;
 
-                source.connect(analyser);
-                analyser.connect(processor);
-                processor.connect(audioCtx.destination);
+    await new Promise(r => setTimeout(r, 50));
 
-                rxChunks = [];
-                isRecording = true;
+    // Combine chunks
+    const totalLen = rxChunks.reduce((s, c) => s + c.length, 0);
+    const combined = new Float32Array(totalLen);
+    let offset = 0;
+    for (const chunk of rxChunks) { combined.set(chunk, offset); offset += chunk.length; }
 
-                processor.onaudioprocess = e => {
-                    if (isRecording) {
-                        rxChunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
-                    }
-                };
+    const imgData = decodeSSTV(combined);
 
-                document.getElementById('rx-btn').disabled = true;
-                document.getElementById('rx-stop').disabled = false;
-                document.getElementById('rx-status').textContent = 'Recording...';
+    if (imgData) {
+        const canvas = document.getElementById('rx-canvas');
+        canvas.getContext('2d').putImageData(imgData, 0, 0);
+        canvas.style.display = 'block';
+        document.getElementById('rx-placeholder').style.display = 'none';
+        document.getElementById('rx-save').disabled = false;
+        document.getElementById('rx-status').textContent = 'Decoded!';
+    } else {
+        document.getElementById('rx-status').textContent = 'Decoding failed - not enough signal';
+    }
+    document.getElementById('rx-decode').disabled = false;
+}
 
-                function updateRx() {
-                    if (!isRecording) return;
-                    drawWaveform('rx-wave', analyser);
-                    const secs = rxChunks.reduce((s, c) => s + c.length, 0) / 44100;
-                    document.getElementById('rx-status').textContent = `Recording: ${secs.toFixed(1)}s`;
-                    requestAnimationFrame(updateRx);
-                }
-                updateRx();
-            } catch (err) {
-                document.getElementById('rx-status').textContent = 'Mic error: ' + err.message;
-            }
-        }
+function saveImage() {
+    const canvas = document.getElementById('rx-canvas');
+    const link = document.createElement('a');
+    link.download = 'sstv_' + Date.now() + '.png';
+    link.href = canvas.toDataURL();
+    link.click();
+}
 
-        function stopRx() {
-            isRecording = false;
-            if (rxStream) { rxStream.getTracks().forEach(t => t.stop()); rxStream = null; }
-            document.getElementById('rx-btn').disabled = false;
-            document.getElementById('rx-stop').disabled = true;
-            document.getElementById('rx-decode').disabled = rxChunks.length === 0;
-            document.getElementById('rx-status').textContent = 'Ready to decode';
-        }
+function drawWaveform(canvasId) {
+    if (!analyser) return;
+    const canvas = document.getElementById(canvasId);
+    const ctx = canvas.getContext('2d');
+    canvas.width = canvas.offsetWidth * 2;
+    canvas.height = canvas.offsetHeight * 2;
 
-        // RX: Decode
-        async function decode() {
-            document.getElementById('rx-status').textContent = 'Decoding...';
-            document.getElementById('rx-decode').disabled = true;
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteTimeDomainData(data);
 
-            // Combine chunks
-            const totalLen = rxChunks.reduce((s, c) => s + c.length, 0);
-            const combined = new Float32Array(totalLen);
-            let offset = 0;
-            for (const chunk of rxChunks) { combined.set(chunk, offset); offset += chunk.length; }
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = '#4ecdc4';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
 
-            // Send to server
-            const audioB64 = btoa(String.fromCharCode(...new Uint8Array(combined.buffer)));
-
-            try {
-                const res = await fetch(API + '/api/decode', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ audio: audioB64, sample_rate: 44100 })
-                });
-                const data = await res.json();
-                if (!data.success) throw new Error(data.error);
-
-                // Display image
-                const img = new Image();
-                img.onload = () => {
-                    const canvas = document.getElementById('rx-canvas');
-                    canvas.getContext('2d').drawImage(img, 0, 0);
-                    canvas.style.display = 'block';
-                    document.getElementById('rx-placeholder').style.display = 'none';
-                    document.getElementById('rx-save').disabled = false;
-                };
-                img.src = 'data:image/png;base64,' + data.image;
-                document.getElementById('rx-status').textContent = 'Decoded!';
-            } catch (err) {
-                document.getElementById('rx-status').textContent = 'Error: ' + err.message;
-            }
-            document.getElementById('rx-decode').disabled = false;
-        }
-
-        function saveImage() {
-            const canvas = document.getElementById('rx-canvas');
-            const link = document.createElement('a');
-            link.download = 'sstv_' + Date.now() + '.png';
-            link.href = canvas.toDataURL();
-            link.click();
-        }
-
-        function drawWaveform(canvasId, analyser) {
-            const canvas = document.getElementById(canvasId);
-            const ctx = canvas.getContext('2d');
-            canvas.width = canvas.offsetWidth * 2;
-            canvas.height = canvas.offsetHeight * 2;
-
-            const data = new Uint8Array(analyser.frequencyBinCount);
-            analyser.getByteTimeDomainData(data);
-
-            ctx.fillStyle = '#000';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.strokeStyle = '#4ecdc4';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-
-            for (let i = 0; i < data.length; i++) {
-                const x = i / data.length * canvas.width;
-                const y = data[i] / 255 * canvas.height;
-                i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-            }
-            ctx.stroke();
-        }
-    </script>
+    for (let i = 0; i < data.length; i++) {
+        const x = i / data.length * canvas.width;
+        const y = data[i] / 255 * canvas.height;
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+}
+</script>
 </body>
 </html>
