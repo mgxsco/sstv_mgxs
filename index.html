@@ -650,12 +650,17 @@ function renderWithAdjustments(phaseOffset, skewFactor, lineOffset) {
     liveCrImage = new Array(HEIGHT).fill(null).map(() => new Uint8Array(WIDTH).fill(128));
     liveCbImage = new Array(HEIGHT).fill(null).map(() => new Uint8Array(WIDTH).fill(128));
 
+    // First pass: decode all lines and detect which color channel each has
+    const lineColors = []; // true = Cr (even/black sep), false = Cb (odd/white sep)
+
     for (let line = 0; line < HEIGHT; line++) {
-        // Apply skew: each line starts at a slightly different position
         const lineSamples = baseLineSamples + skewFactor;
         const lineStart = decodedImageStart + phaseOffset + lineOffset + Math.floor(line * lineSamples);
 
-        if (lineStart < 0 || lineStart + baseLineSamples > freqs.length) continue;
+        if (lineStart < 0 || lineStart + baseLineSamples > freqs.length) {
+            lineColors.push(line % 2 === 0); // fallback
+            continue;
+        }
 
         // Extract Y data
         const yStart = lineStart + syncSamples + porchSamples;
@@ -668,11 +673,29 @@ function renderWithAdjustments(phaseOffset, skewFactor, lineOffset) {
             }
         }
 
+        // Detect separator tone to determine color channel
+        // Even lines (Cr): separator is ~1500Hz (black)
+        // Odd lines (Cb): separator is ~2300Hz (white)
+        const sepStart = yEnd;
+        let sepFreqSum = 0;
+        let sepCount = 0;
+        for (let s = 0; s < sepSamples && sepStart + s < freqs.length; s++) {
+            sepFreqSum += freqs[sepStart + s];
+            sepCount++;
+        }
+        const avgSepFreq = sepCount > 0 ? sepFreqSum / sepCount : 1900;
+
+        // If separator freq < 1700Hz, it's a Cr line (black separator)
+        // If separator freq > 1700Hz, it's a Cb line (white separator)
+        const isCrLine = avgSepFreq < 1700;
+        lineColors.push(isCrLine);
+
         // Extract color data
         const colorStart = yEnd + sepSamples + colorPorchSamples;
         const colorEnd = colorStart + colorSamples;
-        const isEven = line % 2 === 0;
-        const colorImg = isEven ? liveCbImage : liveCrImage;
+
+        // Store to correct color buffer based on detected separator
+        const colorImg = isCrLine ? liveCrImage : liveCbImage;
 
         for (let x = 0; x < WIDTH; x++) {
             const idx = colorStart + Math.floor(x / WIDTH * (colorEnd - colorStart));
@@ -680,25 +703,53 @@ function renderWithAdjustments(phaseOffset, skewFactor, lineOffset) {
                 colorImg[line][x] = freqToValue(freqs[idx]);
             }
         }
-
-        // Interpolate missing color
-        if (isEven && line > 0) {
-            liveCrImage[line] = liveCrImage[line - 1].slice();
-        } else if (!isEven && line > 0) {
-            liveCbImage[line] = liveCbImage[line - 1].slice();
-        }
     }
 
-    // Better color interpolation
-    for (let i = 1; i < HEIGHT - 1; i++) {
-        const isEven = i % 2 === 0;
-        if (isEven) {
-            for (let x = 0; x < WIDTH; x++) {
-                liveCrImage[i][x] = Math.floor((liveCrImage[i - 1][x] + liveCrImage[i + 1][x]) / 2);
+    // Second pass: interpolate missing color channels
+    for (let line = 0; line < HEIGHT; line++) {
+        const isCrLine = lineColors[line];
+
+        if (isCrLine) {
+            // This line has Cr, need to interpolate Cb
+            // Find nearest lines with Cb
+            let prevCb = -1, nextCb = -1;
+            for (let i = line - 1; i >= 0; i--) {
+                if (!lineColors[i]) { prevCb = i; break; }
+            }
+            for (let i = line + 1; i < HEIGHT; i++) {
+                if (!lineColors[i]) { nextCb = i; break; }
+            }
+
+            if (prevCb >= 0 && nextCb >= 0) {
+                // Interpolate between prev and next
+                const t = (line - prevCb) / (nextCb - prevCb);
+                for (let x = 0; x < WIDTH; x++) {
+                    liveCbImage[line][x] = Math.floor(liveCbImage[prevCb][x] * (1 - t) + liveCbImage[nextCb][x] * t);
+                }
+            } else if (prevCb >= 0) {
+                liveCbImage[line] = liveCbImage[prevCb].slice();
+            } else if (nextCb >= 0) {
+                liveCbImage[line] = liveCbImage[nextCb].slice();
             }
         } else {
-            for (let x = 0; x < WIDTH; x++) {
-                liveCbImage[i][x] = Math.floor((liveCbImage[i - 1][x] + liveCbImage[i + 1][x]) / 2);
+            // This line has Cb, need to interpolate Cr
+            let prevCr = -1, nextCr = -1;
+            for (let i = line - 1; i >= 0; i--) {
+                if (lineColors[i]) { prevCr = i; break; }
+            }
+            for (let i = line + 1; i < HEIGHT; i++) {
+                if (lineColors[i]) { nextCr = i; break; }
+            }
+
+            if (prevCr >= 0 && nextCr >= 0) {
+                const t = (line - prevCr) / (nextCr - prevCr);
+                for (let x = 0; x < WIDTH; x++) {
+                    liveCrImage[line][x] = Math.floor(liveCrImage[prevCr][x] * (1 - t) + liveCrImage[nextCr][x] * t);
+                }
+            } else if (prevCr >= 0) {
+                liveCrImage[line] = liveCrImage[prevCr].slice();
+            } else if (nextCr >= 0) {
+                liveCrImage[line] = liveCrImage[nextCr].slice();
             }
         }
     }
