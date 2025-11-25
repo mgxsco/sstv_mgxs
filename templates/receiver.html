@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSTV RX - Receiver</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+            padding: 1rem;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+        .header h1 {
+            font-size: 1.5rem;
+            color: #4ecdc4;
+        }
+        .back-link {
+            color: #8892b0;
+            text-decoration: none;
+        }
+        .back-link:hover { color: #fff; }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        .panel {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+        }
+        .panel h2 {
+            font-size: 1rem;
+            color: #8892b0;
+            margin-bottom: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .image-area {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        .image-box {
+            flex: 1;
+            min-width: 300px;
+            aspect-ratio: 4/3;
+            background: rgba(0, 0, 0, 0.3);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            position: relative;
+        }
+        .image-box img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+        .image-box .placeholder {
+            text-align: center;
+            color: #8892b0;
+        }
+        .image-box .placeholder span {
+            font-size: 3rem;
+            display: block;
+            margin-bottom: 0.5rem;
+        }
+        .controls {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        button {
+            background: linear-gradient(135deg, #4ecdc4, #44a08d);
+            color: #fff;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        button:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(78, 205, 196, 0.4); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+        button.secondary {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        button.secondary:hover {
+            background: rgba(255, 255, 255, 0.2);
+            box-shadow: none;
+        }
+        button.recording {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a5a);
+            animation: pulse 1s infinite;
+        }
+        .status {
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            background: rgba(255, 255, 255, 0.1);
+        }
+        .status.receiving {
+            background: rgba(78, 205, 196, 0.2);
+            color: #4ecdc4;
+            animation: pulse 1s infinite;
+        }
+        .status.decoding {
+            background: rgba(255, 193, 7, 0.2);
+            color: #ffc107;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .waveform {
+            height: 100px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            overflow: hidden;
+            position: relative;
+        }
+        .waveform canvas {
+            width: 100%;
+            height: 100%;
+        }
+        .spectrogram {
+            height: 150px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            overflow: hidden;
+            margin-top: 1rem;
+        }
+        .spectrogram canvas {
+            width: 100%;
+            height: 100%;
+        }
+        .info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        .info-item {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 0.75rem;
+            border-radius: 8px;
+        }
+        .info-item label {
+            font-size: 0.75rem;
+            color: #8892b0;
+            display: block;
+        }
+        .info-item value {
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+        .freq-display {
+            font-family: 'Courier New', monospace;
+            font-size: 2rem;
+            color: #4ecdc4;
+            text-align: center;
+            padding: 1rem;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            margin-top: 1rem;
+        }
+        .history {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin-top: 1rem;
+        }
+        .history-item {
+            width: 80px;
+            height: 60px;
+            border-radius: 4px;
+            overflow: hidden;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.3s;
+        }
+        .history-item:hover {
+            border-color: #4ecdc4;
+        }
+        .history-item img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📻 SSTV Receiver</h1>
+        <a href="/" class="back-link">← Back to Home</a>
+    </div>
+
+    <div class="container">
+        <div class="panel">
+            <h2>Reception Controls</h2>
+            <div class="controls">
+                <button id="startBtn" onclick="startListening()">
+                    <span>🎙️</span> Start Listening
+                </button>
+                <button id="stopBtn" onclick="stopListening()" disabled class="secondary">
+                    <span>⏹</span> Stop
+                </button>
+                <button id="decodeBtn" onclick="decodeRecording()" disabled class="secondary">
+                    <span>🔍</span> Decode Recording
+                </button>
+                <div class="status" id="status">Ready</div>
+            </div>
+
+            <div class="waveform">
+                <canvas id="waveformCanvas"></canvas>
+            </div>
+
+            <div class="freq-display" id="freqDisplay">-- Hz</div>
+
+            <div class="spectrogram">
+                <canvas id="spectrogramCanvas"></canvas>
+            </div>
+
+            <div class="info">
+                <div class="info-item">
+                    <label>Recording Duration</label>
+                    <value id="duration">0.0s</value>
+                </div>
+                <div class="info-item">
+                    <label>Buffer Size</label>
+                    <value id="bufferSize">0 samples</value>
+                </div>
+                <div class="info-item">
+                    <label>Peak Frequency</label>
+                    <value id="peakFreq">-- Hz</value>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2>Decoded Image</h2>
+            <div class="image-area">
+                <div class="image-box" id="imageBox">
+                    <div class="placeholder" id="placeholder">
+                        <span>📺</span>
+                        <p>Decoded image will appear here</p>
+                    </div>
+                    <img id="decodedImage" style="display: none;">
+                </div>
+            </div>
+
+            <div class="controls" style="margin-top: 1rem;">
+                <button id="saveBtn" onclick="saveImage()" disabled class="secondary">
+                    <span>💾</span> Save Image
+                </button>
+                <button id="clearBtn" onclick="clearImage()" class="secondary">
+                    <span>🗑️</span> Clear
+                </button>
+            </div>
+
+            <h2 style="margin-top: 1.5rem;">History</h2>
+            <div class="history" id="history">
+                <p style="color: #8892b0; font-size: 0.85rem;">No decoded images yet</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let socket;
+        let audioContext;
+        let analyser;
+        let mediaStream;
+        let processor;
+        let isListening = false;
+        let audioBuffer = [];
+        let spectrogramData = [];
+        let history = [];
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            initSocket();
+            initCanvases();
+        });
+
+        function initSocket() {
+            socket = io();
+
+            socket.on('connect', () => {
+                console.log('Connected to server');
+                setStatus('Connected');
+            });
+
+            socket.on('decoded_image', (data) => {
+                console.log('Received decoded image');
+                displayImage(data.image);
+                setStatus('Decoded!');
+            });
+
+            socket.on('sstv_signal', (data) => {
+                console.log('Received broadcast SSTV signal');
+                setStatus('Receiving broadcast...', 'decoding');
+
+                // Decode the broadcast signal
+                socket.emit('decode_audio', {
+                    audio: data.audio,
+                    sample_rate: data.sample_rate
+                });
+            });
+
+            socket.on('error', (data) => {
+                console.error('Error:', data.message);
+                setStatus('Error: ' + data.message);
+            });
+        }
+
+        function initCanvases() {
+            // Waveform canvas
+            const waveCanvas = document.getElementById('waveformCanvas');
+            waveCanvas.width = waveCanvas.offsetWidth * 2;
+            waveCanvas.height = waveCanvas.offsetHeight * 2;
+            const waveCtx = waveCanvas.getContext('2d');
+            waveCtx.scale(2, 2);
+
+            // Spectrogram canvas
+            const specCanvas = document.getElementById('spectrogramCanvas');
+            specCanvas.width = specCanvas.offsetWidth;
+            specCanvas.height = specCanvas.offsetHeight;
+        }
+
+        async function startListening() {
+            try {
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false,
+                        sampleRate: 44100
+                    }
+                });
+
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                    sampleRate: 44100
+                });
+
+                const source = audioContext.createMediaStreamSource(mediaStream);
+
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 4096;
+                analyser.smoothingTimeConstant = 0.3;
+
+                // ScriptProcessor for recording (deprecated but widely supported)
+                processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+                source.connect(analyser);
+                analyser.connect(processor);
+                processor.connect(audioContext.destination);
+
+                audioBuffer = [];
+
+                processor.onaudioprocess = (e) => {
+                    if (!isListening) return;
+
+                    const data = e.inputBuffer.getChannelData(0);
+                    audioBuffer.push(new Float32Array(data));
+
+                    // Update buffer info
+                    const totalSamples = audioBuffer.reduce((sum, arr) => sum + arr.length, 0);
+                    document.getElementById('bufferSize').textContent = totalSamples.toLocaleString() + ' samples';
+                    document.getElementById('duration').textContent = (totalSamples / 44100).toFixed(1) + 's';
+                };
+
+                isListening = true;
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('startBtn').classList.add('recording');
+                document.getElementById('stopBtn').disabled = false;
+                document.getElementById('decodeBtn').disabled = true;
+
+                setStatus('Listening...', 'receiving');
+                drawVisualizations();
+
+            } catch (err) {
+                alert('Could not access microphone: ' + err.message);
+            }
+        }
+
+        function stopListening() {
+            isListening = false;
+
+            if (processor) {
+                processor.disconnect();
+            }
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+            }
+
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('startBtn').classList.remove('recording');
+            document.getElementById('stopBtn').disabled = true;
+            document.getElementById('decodeBtn').disabled = audioBuffer.length === 0;
+
+            setStatus('Stopped - Ready to decode');
+        }
+
+        function drawVisualizations() {
+            if (!analyser) return;
+
+            // Waveform
+            const waveCanvas = document.getElementById('waveformCanvas');
+            const waveCtx = waveCanvas.getContext('2d');
+            const width = waveCanvas.offsetWidth;
+            const height = waveCanvas.offsetHeight;
+
+            const timeData = new Uint8Array(analyser.frequencyBinCount);
+            analyser.getByteTimeDomainData(timeData);
+
+            waveCtx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+            waveCtx.fillRect(0, 0, width, height);
+
+            waveCtx.lineWidth = 2;
+            waveCtx.strokeStyle = '#4ecdc4';
+            waveCtx.beginPath();
+
+            const sliceWidth = width / timeData.length;
+            let x = 0;
+
+            for (let i = 0; i < timeData.length; i++) {
+                const v = timeData[i] / 128.0;
+                const y = v * height / 2;
+
+                if (i === 0) {
+                    waveCtx.moveTo(x, y);
+                } else {
+                    waveCtx.lineTo(x, y);
+                }
+                x += sliceWidth;
+            }
+            waveCtx.stroke();
+
+            // Frequency analysis
+            const freqData = new Uint8Array(analyser.frequencyBinCount);
+            analyser.getByteFrequencyData(freqData);
+
+            // Find peak frequency (in SSTV range 1000-2500 Hz)
+            const minBin = Math.floor(1000 * analyser.fftSize / audioContext.sampleRate);
+            const maxBin = Math.floor(2500 * analyser.fftSize / audioContext.sampleRate);
+
+            let maxVal = 0;
+            let maxBinIdx = minBin;
+            for (let i = minBin; i < maxBin; i++) {
+                if (freqData[i] > maxVal) {
+                    maxVal = freqData[i];
+                    maxBinIdx = i;
+                }
+            }
+
+            const peakFreq = maxBinIdx * audioContext.sampleRate / analyser.fftSize;
+            document.getElementById('freqDisplay').textContent = Math.round(peakFreq) + ' Hz';
+            document.getElementById('peakFreq').textContent = Math.round(peakFreq) + ' Hz';
+
+            // Spectrogram
+            const specCanvas = document.getElementById('spectrogramCanvas');
+            const specCtx = specCanvas.getContext('2d');
+            const specWidth = specCanvas.width;
+            const specHeight = specCanvas.height;
+
+            // Shift existing spectrogram left
+            const imageData = specCtx.getImageData(1, 0, specWidth - 1, specHeight);
+            specCtx.putImageData(imageData, 0, 0);
+
+            // Draw new column
+            for (let i = 0; i < specHeight; i++) {
+                const freqIdx = Math.floor((1 - i / specHeight) * (maxBin - minBin) + minBin);
+                const value = freqData[freqIdx];
+
+                // Color based on intensity
+                const hue = 180 - value * 0.7;  // Cyan to red
+                specCtx.fillStyle = `hsl(${hue}, 80%, ${value / 5}%)`;
+                specCtx.fillRect(specWidth - 1, i, 1, 1);
+            }
+
+            if (isListening) {
+                requestAnimationFrame(drawVisualizations);
+            }
+        }
+
+        async function decodeRecording() {
+            if (audioBuffer.length === 0) {
+                alert('No audio recorded');
+                return;
+            }
+
+            setStatus('Decoding...', 'decoding');
+
+            // Combine all audio chunks
+            const totalLength = audioBuffer.reduce((sum, arr) => sum + arr.length, 0);
+            const combined = new Float32Array(totalLength);
+            let offset = 0;
+            for (const chunk of audioBuffer) {
+                combined.set(chunk, offset);
+                offset += chunk.length;
+            }
+
+            // Convert to base64
+            const bytes = new Uint8Array(combined.buffer);
+            let binary = '';
+            for (let i = 0; i < bytes.length; i++) {
+                binary += String.fromCharCode(bytes[i]);
+            }
+            const base64Audio = btoa(binary);
+
+            // Send to server for decoding
+            socket.emit('decode_audio', {
+                audio: base64Audio,
+                sample_rate: 44100
+            });
+        }
+
+        function displayImage(base64Image) {
+            const img = document.getElementById('decodedImage');
+            img.src = 'data:image/png;base64,' + base64Image;
+            img.style.display = 'block';
+            document.getElementById('placeholder').style.display = 'none';
+            document.getElementById('saveBtn').disabled = false;
+
+            // Add to history
+            addToHistory(base64Image);
+        }
+
+        function addToHistory(base64Image) {
+            history.unshift(base64Image);
+            if (history.length > 10) history.pop();
+
+            const historyDiv = document.getElementById('history');
+            historyDiv.innerHTML = '';
+
+            history.forEach((img, idx) => {
+                const item = document.createElement('div');
+                item.className = 'history-item';
+                item.innerHTML = `<img src="data:image/png;base64,${img}">`;
+                item.onclick = () => displayImage(img);
+                historyDiv.appendChild(item);
+            });
+        }
+
+        function saveImage() {
+            const img = document.getElementById('decodedImage');
+            if (!img.src) return;
+
+            const link = document.createElement('a');
+            link.download = 'sstv_decoded_' + Date.now() + '.png';
+            link.href = img.src;
+            link.click();
+        }
+
+        function clearImage() {
+            document.getElementById('decodedImage').style.display = 'none';
+            document.getElementById('placeholder').style.display = 'block';
+            document.getElementById('saveBtn').disabled = true;
+            audioBuffer = [];
+            document.getElementById('bufferSize').textContent = '0 samples';
+            document.getElementById('duration').textContent = '0.0s';
+        }
+
+        function setStatus(text, type = '') {
+            const status = document.getElementById('status');
+            status.textContent = text;
+            status.className = 'status' + (type ? ' ' + type : '');
+        }
+    </script>
+</body>
+</html>

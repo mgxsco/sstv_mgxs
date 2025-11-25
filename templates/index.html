@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSTV Robot36 - Live TX/RX</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+        }
+        .container {
+            text-align: center;
+            padding: 2rem;
+        }
+        h1 {
+            font-size: 3rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(90deg, #00f5a0, #00d9f5);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .subtitle {
+            color: #8892b0;
+            margin-bottom: 3rem;
+            font-size: 1.2rem;
+        }
+        .cards {
+            display: flex;
+            gap: 2rem;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 2rem;
+            width: 280px;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            color: inherit;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            background: rgba(255, 255, 255, 0.1);
+            border-color: #00f5a0;
+        }
+        .card-icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+        }
+        .card h2 {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .card p {
+            color: #8892b0;
+            font-size: 0.9rem;
+        }
+        .tx { border-color: #ff6b6b; }
+        .tx:hover { border-color: #ff6b6b; box-shadow: 0 0 30px rgba(255, 107, 107, 0.3); }
+        .rx { border-color: #4ecdc4; }
+        .rx:hover { border-color: #4ecdc4; box-shadow: 0 0 30px rgba(78, 205, 196, 0.3); }
+        .specs {
+            margin-top: 3rem;
+            padding: 1.5rem;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 12px;
+            font-size: 0.85rem;
+            color: #8892b0;
+        }
+        .specs h3 {
+            color: #fff;
+            margin-bottom: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>SSTV Robot36</h1>
+        <p class="subtitle">Live Slow Scan Television Encoder/Decoder</p>
+
+        <div class="cards">
+            <a href="/sender" class="card tx">
+                <div class="card-icon">📡</div>
+                <h2>Transmit (TX)</h2>
+                <p>Upload or capture an image and transmit it as SSTV audio signal</p>
+            </a>
+
+            <a href="/receiver" class="card rx">
+                <div class="card-icon">📻</div>
+                <h2>Receive (RX)</h2>
+                <p>Receive SSTV audio from microphone and decode it to an image</p>
+            </a>
+        </div>
+
+        <div class="specs">
+            <h3>Robot36 Specifications</h3>
+            <p>320x240 pixels | ~36 seconds | YCrCb Color | VIS Code 8</p>
+        </div>
+    </div>
+</body>
+</html>
