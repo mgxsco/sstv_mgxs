@@ -51,6 +51,40 @@
         .mode-btn { padding: 0.5rem 1rem; font-size: 0.85rem; border-radius: 20px; }
         .mode-btn.active { background: #4ecdc4; }
         .mode-btn:not(.active) { background: rgba(255,255,255,0.1); }
+
+        /* Adjustment controls */
+        .adjust-panel { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.1); }
+        .adjust-panel h3 { font-size: 0.8rem; color: #8892b0; margin-bottom: 0.75rem; text-transform: uppercase; }
+        .slider-group { margin-bottom: 0.75rem; }
+        .slider-label { display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 0.25rem; }
+        .slider-label span { color: #8892b0; }
+        .slider-label .value { color: #4ecdc4; font-family: monospace; }
+        input[type="range"] {
+            width: 100%;
+            height: 6px;
+            -webkit-appearance: none;
+            background: rgba(255,255,255,0.1);
+            border-radius: 3px;
+            outline: none;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            background: #4ecdc4;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        input[type="range"]::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            background: #4ecdc4;
+            border-radius: 50%;
+            cursor: pointer;
+            border: none;
+        }
+        .adjust-buttons { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
+        .adjust-buttons button { padding: 0.5rem 1rem; font-size: 0.85rem; }
     </style>
 </head>
 <body>
@@ -113,6 +147,37 @@
                 <button id="rx-save" onclick="saveImage()" disabled class="secondary">Save Image</button>
                 <button id="rx-clear" onclick="clearRx()" class="secondary">Clear</button>
             </div>
+
+            <!-- Phase and Skew Adjustment -->
+            <div class="adjust-panel" id="adjust-panel" style="display:none;">
+                <h3>Image Alignment</h3>
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <span>Phase (horizontal shift)</span>
+                        <span class="value" id="phase-value">0</span>
+                    </div>
+                    <input type="range" id="phase-slider" min="-2000" max="2000" value="0" oninput="adjustImage()">
+                </div>
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <span>Skew (timing drift)</span>
+                        <span class="value" id="skew-value">0.000</span>
+                    </div>
+                    <input type="range" id="skew-slider" min="-100" max="100" value="0" step="1" oninput="adjustImage()">
+                </div>
+                <div class="slider-group">
+                    <div class="slider-label">
+                        <span>Line Start Offset</span>
+                        <span class="value" id="offset-value">0</span>
+                    </div>
+                    <input type="range" id="offset-slider" min="-500" max="500" value="0" oninput="adjustImage()">
+                </div>
+                <div class="adjust-buttons">
+                    <button onclick="resetAdjustments()" class="secondary">Reset</button>
+                    <button onclick="autoAlign()">Auto Align</button>
+                    <button onclick="applyAndSave()">Apply & Save</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -147,7 +212,12 @@ const COLOR_SCAN_DURATION = 0.044;
 
 const LINE_DURATION = SYNC_DURATION + SYNC_PORCH_DURATION + Y_SCAN_DURATION +
                       SEPARATOR_DURATION + COLOR_PORCH_DURATION + COLOR_SCAN_DURATION;
-const TOTAL_DURATION = LINE_DURATION * HEIGHT + 0.7; // ~36 seconds + header
+const TOTAL_DURATION = LINE_DURATION * HEIGHT + 0.7;
+
+// Store decoded frequency data for re-rendering with adjustments
+let decodedFreqs = null;
+let decodedImageStart = 0;
+let decodedLinesCount = 0;
 
 // ============================================
 // Color Conversion
@@ -209,7 +279,6 @@ function encodeSSTV(imageData) {
         }
     }
 
-    // Convert image to YCrCb
     const ycrcb = [];
     for (let row = 0; row < HEIGHT; row++) {
         const yRow = [], crRow = [], cbRow = [];
@@ -227,11 +296,9 @@ function encodeSSTV(imageData) {
         ycrcb.push({ y: yRow, cr: crRow, cb: cbRow });
     }
 
-    // Header
     addTone(LEADER_FREQ, LEADER_DURATION);
     addTone(FREQ_SYNC, BREAK_DURATION);
 
-    // VIS code
     addTone(FREQ_VIS_1, VIS_BIT_DURATION);
     let parity = 0;
     for (let i = 0; i < 7; i++) {
@@ -243,7 +310,6 @@ function encodeSSTV(imageData) {
     addTone(FREQ_VIS_0, VIS_BIT_DURATION);
     addTone(FREQ_SYNC, BREAK_DURATION);
 
-    // Scan lines
     for (let line = 0; line < HEIGHT; line++) {
         const isEven = line % 2 === 0;
         addTone(FREQ_SYNC, SYNC_DURATION);
@@ -262,10 +328,9 @@ function encodeSSTV(imageData) {
 }
 
 // ============================================
-// LIVE DECODER - Real-time line-by-line
+// LIVE DECODER
 // ============================================
 
-// Image buffers for live display
 let liveYImage, liveCrImage, liveCbImage;
 let liveLineCount = 0;
 let liveCanvas, liveCtx;
@@ -567,6 +632,164 @@ function detectSignalStart(freqs) {
     return 0;
 }
 
+// Render image with phase/skew adjustments
+function renderWithAdjustments(phaseOffset, skewFactor, lineOffset) {
+    if (!decodedFreqs) return;
+
+    const freqs = decodedFreqs;
+    const baseLineSamples = Math.floor(LINE_DURATION * SAMPLE_RATE);
+    const syncSamples = Math.floor(SYNC_DURATION * SAMPLE_RATE);
+    const porchSamples = Math.floor(SYNC_PORCH_DURATION * SAMPLE_RATE);
+    const ySamples = Math.floor(Y_SCAN_DURATION * SAMPLE_RATE);
+    const sepSamples = Math.floor(SEPARATOR_DURATION * SAMPLE_RATE);
+    const colorPorchSamples = Math.floor(COLOR_PORCH_DURATION * SAMPLE_RATE);
+    const colorSamples = Math.floor(COLOR_SCAN_DURATION * SAMPLE_RATE);
+
+    // Re-init buffers
+    liveYImage = new Array(HEIGHT).fill(null).map(() => new Uint8Array(WIDTH).fill(128));
+    liveCrImage = new Array(HEIGHT).fill(null).map(() => new Uint8Array(WIDTH).fill(128));
+    liveCbImage = new Array(HEIGHT).fill(null).map(() => new Uint8Array(WIDTH).fill(128));
+
+    for (let line = 0; line < HEIGHT; line++) {
+        // Apply skew: each line starts at a slightly different position
+        const lineSamples = baseLineSamples + skewFactor;
+        const lineStart = decodedImageStart + phaseOffset + lineOffset + Math.floor(line * lineSamples);
+
+        if (lineStart < 0 || lineStart + baseLineSamples > freqs.length) continue;
+
+        // Extract Y data
+        const yStart = lineStart + syncSamples + porchSamples;
+        const yEnd = yStart + ySamples;
+
+        for (let x = 0; x < WIDTH; x++) {
+            const idx = yStart + Math.floor(x / WIDTH * (yEnd - yStart));
+            if (idx >= 0 && idx < freqs.length) {
+                liveYImage[line][x] = freqToValue(freqs[idx]);
+            }
+        }
+
+        // Extract color data
+        const colorStart = yEnd + sepSamples + colorPorchSamples;
+        const colorEnd = colorStart + colorSamples;
+        const isEven = line % 2 === 0;
+        const colorImg = isEven ? liveCbImage : liveCrImage;
+
+        for (let x = 0; x < WIDTH; x++) {
+            const idx = colorStart + Math.floor(x / WIDTH * (colorEnd - colorStart));
+            if (idx >= 0 && idx < freqs.length) {
+                colorImg[line][x] = freqToValue(freqs[idx]);
+            }
+        }
+
+        // Interpolate missing color
+        if (isEven && line > 0) {
+            liveCrImage[line] = liveCrImage[line - 1].slice();
+        } else if (!isEven && line > 0) {
+            liveCbImage[line] = liveCbImage[line - 1].slice();
+        }
+    }
+
+    // Better color interpolation
+    for (let i = 1; i < HEIGHT - 1; i++) {
+        const isEven = i % 2 === 0;
+        if (isEven) {
+            for (let x = 0; x < WIDTH; x++) {
+                liveCrImage[i][x] = Math.floor((liveCrImage[i - 1][x] + liveCrImage[i + 1][x]) / 2);
+            }
+        } else {
+            for (let x = 0; x < WIDTH; x++) {
+                liveCbImage[i][x] = Math.floor((liveCbImage[i - 1][x] + liveCbImage[i + 1][x]) / 2);
+            }
+        }
+    }
+
+    renderFullImage();
+}
+
+function adjustImage() {
+    const phase = parseInt(document.getElementById('phase-slider').value);
+    const skew = parseFloat(document.getElementById('skew-slider').value);
+    const offset = parseInt(document.getElementById('offset-slider').value);
+
+    document.getElementById('phase-value').textContent = phase;
+    document.getElementById('skew-value').textContent = skew.toFixed(1);
+    document.getElementById('offset-value').textContent = offset;
+
+    renderWithAdjustments(phase, skew, offset);
+}
+
+function resetAdjustments() {
+    document.getElementById('phase-slider').value = 0;
+    document.getElementById('skew-slider').value = 0;
+    document.getElementById('offset-slider').value = 0;
+    adjustImage();
+}
+
+function autoAlign() {
+    if (!decodedFreqs) return;
+
+    // Try to find sync pulses more precisely
+    const freqs = decodedFreqs;
+    const syncSamples = Math.floor(SYNC_DURATION * SAMPLE_RATE);
+    const lineSamples = Math.floor(LINE_DURATION * SAMPLE_RATE);
+
+    // Search around current start for best sync alignment
+    let bestPhase = 0;
+    let bestScore = 0;
+
+    for (let phase = -1000; phase <= 1000; phase += 50) {
+        let score = 0;
+        for (let line = 0; line < Math.min(20, HEIGHT); line++) {
+            const lineStart = decodedImageStart + phase + line * lineSamples;
+            if (lineStart < 0 || lineStart + syncSamples > freqs.length) continue;
+
+            // Count sync-frequency samples at expected position
+            for (let s = 0; s < syncSamples; s++) {
+                if (freqs[lineStart + s] < 1350 && freqs[lineStart + s] > 1100) {
+                    score++;
+                }
+            }
+        }
+        if (score > bestScore) {
+            bestScore = score;
+            bestPhase = phase;
+        }
+    }
+
+    // Try to detect skew by comparing first and last line sync positions
+    let bestSkew = 0;
+    bestScore = 0;
+
+    for (let skew = -50; skew <= 50; skew += 2) {
+        let score = 0;
+        const adjustedLineSamples = lineSamples + skew;
+
+        for (let line = 0; line < HEIGHT; line += 20) {
+            const lineStart = decodedImageStart + bestPhase + Math.floor(line * adjustedLineSamples);
+            if (lineStart < 0 || lineStart + syncSamples > freqs.length) continue;
+
+            for (let s = 0; s < syncSamples; s++) {
+                if (freqs[lineStart + s] < 1350 && freqs[lineStart + s] > 1100) {
+                    score++;
+                }
+            }
+        }
+        if (score > bestScore) {
+            bestScore = score;
+            bestSkew = skew;
+        }
+    }
+
+    document.getElementById('phase-slider').value = bestPhase;
+    document.getElementById('skew-slider').value = bestSkew;
+    document.getElementById('offset-slider').value = 0;
+    adjustImage();
+}
+
+function applyAndSave() {
+    saveImage();
+}
+
 function decodeSSTV(audio, onProgress, onLine) {
     console.log('Decoding', audio.length, 'samples...');
     onProgress?.('Starting decode...', 0);
@@ -587,8 +810,12 @@ function decodeSSTV(audio, onProgress, onLine) {
     // FM demodulation
     const freqs = demodulateFFM(audio, onProgress);
 
+    // Store for adjustments
+    decodedFreqs = freqs;
+
     onProgress?.('Finding signal start...', 10);
     const imageStart = detectSignalStart(freqs);
+    decodedImageStart = imageStart;
     console.log('Image starts at sample', imageStart);
 
     onProgress?.('Finding sync pulses...', 20);
@@ -609,7 +836,6 @@ function decodeSSTV(audio, onProgress, onLine) {
         }
     }
 
-    // Use live buffers
     initLiveBuffers();
 
     const syncSamples = Math.floor(SYNC_DURATION * SAMPLE_RATE);
@@ -650,7 +876,6 @@ function decodeSSTV(audio, onProgress, onLine) {
             }
         }
 
-        // Interpolate color for this line
         if (isEven && linesDecoded > 0) {
             liveCrImage[linesDecoded] = liveCrImage[linesDecoded - 1].slice();
         } else if (!isEven && linesDecoded > 0) {
@@ -660,7 +885,6 @@ function decodeSSTV(audio, onProgress, onLine) {
         linesDecoded++;
         liveLineCount = linesDecoded;
 
-        // Render this line immediately
         renderLiveLine(linesDecoded);
 
         const pct = 30 + (linesDecoded / HEIGHT) * 60;
@@ -669,6 +893,7 @@ function decodeSSTV(audio, onProgress, onLine) {
     }
 
     console.log('Decoded', linesDecoded, 'lines');
+    decodedLinesCount = linesDecoded;
 
     if (linesDecoded < 3) {
         return null;
@@ -676,7 +901,6 @@ function decodeSSTV(audio, onProgress, onLine) {
 
     onProgress?.('Interpolating colors...', 92);
 
-    // Better color interpolation
     for (let i = 1; i < linesDecoded - 1; i++) {
         const isEven = i % 2 === 0;
         if (isEven) {
@@ -693,6 +917,10 @@ function decodeSSTV(audio, onProgress, onLine) {
     onProgress?.('Rendering final image...', 98);
     renderFullImage();
 
+    // Show adjustment panel
+    document.getElementById('adjust-panel').style.display = 'block';
+    resetAdjustments();
+
     onProgress?.('Done!', 100);
     return linesDecoded;
 }
@@ -702,11 +930,11 @@ function decodeSSTV(audio, onProgress, onLine) {
 // ============================================
 let audioCtx, txSource, rxStream, rxChunks = [], isListening = false, analyser, animFrame;
 let rxProcessor, rxSource;
-let rxMode = 'auto'; // 'auto' or 'manual'
+let rxMode = 'auto';
 let signalDetected = false;
 let signalStartTime = null;
 let leaderDetectCount = 0;
-const LEADER_DETECT_THRESHOLD = 5; // Number of consecutive leader detections needed
+const LEADER_DETECT_THRESHOLD = 5;
 
 function showTab(id) {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -729,7 +957,6 @@ function setMode(mode) {
     }
 }
 
-// TX: Load image
 document.getElementById('file').onchange = e => {
     const file = e.target.files[0];
     if (!file) return;
@@ -802,7 +1029,6 @@ function stopTx() {
     document.getElementById('tx-status').textContent = 'Stopped';
 }
 
-// RX: Toggle listening
 async function toggleRx() {
     if (isListening) {
         stopAndDecode();
@@ -845,23 +1071,19 @@ async function startListening() {
 
             if (rxMode === 'auto') {
                 if (!signalDetected) {
-                    // Only keep a small buffer while waiting for signal
                     rxChunks.push(chunk);
-                    if (rxChunks.length > 20) rxChunks.shift(); // Keep ~2 seconds buffer
+                    if (rxChunks.length > 20) rxChunks.shift();
                 } else {
                     rxChunks.push(chunk);
 
-                    // Check if we've recorded enough
                     const totalSamples = rxChunks.reduce((s, c) => s + c.length, 0);
                     const recordedTime = totalSamples / SAMPLE_RATE;
 
                     if (recordedTime > TOTAL_DURATION + 2) {
-                        // Auto-stop after full transmission + buffer
                         stopAndDecode();
                     }
                 }
             } else {
-                // Manual mode - record everything
                 rxChunks.push(chunk);
             }
         };
@@ -922,10 +1144,9 @@ function stopAndDecode() {
 }
 
 function detectLeaderTone(freqData, sampleRate, fftSize) {
-    // Find peak in frequency data around 1900 Hz
     const binWidth = sampleRate / fftSize;
     const leaderBin = Math.round(LEADER_FREQ / binWidth);
-    const tolerance = Math.round(150 / binWidth); // ±150 Hz tolerance
+    const tolerance = Math.round(150 / binWidth);
 
     let maxVal = 0;
     let maxBin = 0;
@@ -937,7 +1158,6 @@ function detectLeaderTone(freqData, sampleRate, fftSize) {
         }
     }
 
-    // Check if the peak is strong and near 1900 Hz
     const peakFreq = maxBin * binWidth;
     const isLeader = Math.abs(peakFreq - LEADER_FREQ) < 150 && maxVal > 100;
 
@@ -953,7 +1173,6 @@ function updateRxDisplay() {
         const freqData = new Uint8Array(analyser.frequencyBinCount);
         analyser.getByteFrequencyData(freqData);
 
-        // Find peak frequency
         let maxIdx = 0, maxVal = 0;
         for (let i = 0; i < freqData.length; i++) {
             if (freqData[i] > maxVal) {
@@ -963,7 +1182,6 @@ function updateRxDisplay() {
         }
         const freq = maxIdx * audioCtx.sampleRate / analyser.fftSize;
 
-        // Update frequency display with color coding
         const freqDisplay = document.getElementById('freq-display');
         freqDisplay.textContent = freq > 100 ? `${Math.round(freq)} Hz` : '-- Hz';
         freqDisplay.classList.remove('leader', 'sync', 'data');
@@ -976,18 +1194,15 @@ function updateRxDisplay() {
             freqDisplay.classList.add('data');
         }
 
-        // Signal strength
         const avgLevel = freqData.reduce((a, b) => a + b, 0) / freqData.length;
         document.getElementById('signal-bar').style.width = Math.min(100, avgLevel / 128 * 100) + '%';
 
-        // Auto-detect mode: look for leader tone
         if (rxMode === 'auto' && !signalDetected) {
             const detection = detectLeaderTone(freqData, audioCtx.sampleRate, analyser.fftSize);
 
             if (detection.isLeader) {
                 leaderDetectCount++;
                 if (leaderDetectCount >= LEADER_DETECT_THRESHOLD) {
-                    // Leader tone confirmed!
                     signalDetected = true;
                     signalStartTime = Date.now();
 
@@ -999,7 +1214,6 @@ function updateRxDisplay() {
                     document.getElementById('rx-status').classList.remove('waiting');
                     document.getElementById('rx-status').classList.add('active');
 
-                    // Initialize live display
                     initLiveBuffers();
                 }
             } else {
@@ -1007,7 +1221,6 @@ function updateRxDisplay() {
             }
         }
 
-        // Update status with recording time
         if (signalDetected || rxMode === 'manual') {
             const totalSamples = rxChunks.reduce((s, c) => s + c.length, 0);
             const secs = totalSamples / SAMPLE_RATE;
@@ -1033,7 +1246,6 @@ async function runDecode() {
 
     await new Promise(r => setTimeout(r, 50));
 
-    // Combine chunks
     const totalLen = rxChunks.reduce((s, c) => s + c.length, 0);
     const combined = new Float32Array(totalLen);
     let offset = 0;
@@ -1042,23 +1254,19 @@ async function runDecode() {
         offset += chunk.length;
     }
 
-    // Progress callback
     const onProgress = (msg, pct) => {
         document.getElementById('rx-status').textContent = msg;
         document.getElementById('rx-progress').style.width = pct + '%';
     };
 
-    // Line callback - image is rendered live in decodeSSTV
-    const onLine = (lineNum) => {
-        // Already rendered in decodeSSTV
-    };
+    const onLine = (lineNum) => {};
 
     try {
         const linesDecoded = decodeSSTV(combined, onProgress, onLine);
 
         if (linesDecoded && linesDecoded >= 3) {
             document.getElementById('rx-save').disabled = false;
-            document.getElementById('rx-status').textContent = `Decoded ${linesDecoded} lines successfully!`;
+            document.getElementById('rx-status').textContent = `Decoded ${linesDecoded} lines - adjust alignment below`;
         } else {
             document.getElementById('rx-status').textContent = 'Could not decode - try again';
         }
@@ -1070,7 +1278,6 @@ async function runDecode() {
     document.getElementById('rx-btn').disabled = false;
 }
 
-// RX: Load audio file
 document.getElementById('audio-file').onchange = async e => {
     const file = e.target.files[0];
     if (!file) return;
@@ -1124,6 +1331,8 @@ document.getElementById('audio-file').onchange = async e => {
 function clearRx() {
     rxChunks = [];
     liveLineCount = 0;
+    decodedFreqs = null;
+    decodedImageStart = 0;
 
     const canvas = document.getElementById('rx-canvas');
     const ctx = canvas.getContext('2d');
@@ -1133,6 +1342,7 @@ function clearRx() {
 
     document.getElementById('rx-placeholder').style.display = 'block';
     document.getElementById('line-indicator').style.display = 'none';
+    document.getElementById('adjust-panel').style.display = 'none';
     document.getElementById('rx-save').disabled = true;
     document.getElementById('rx-progress').style.width = '0%';
     document.getElementById('rx-status').textContent = 'Cleared';
