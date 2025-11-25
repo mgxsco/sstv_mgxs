@@ -419,6 +419,7 @@ function initStreamDecoder() {
     streamLeaderCount = 0;
     streamImageStartIdx = 0;
     streamLastProcessed = 0;
+    hasRealtimeImage = false;
     initLiveBuffers();
 }
 
@@ -595,6 +596,9 @@ function processStreamChunk(chunk) {
         // Update progress
         document.getElementById('rx-progress').style.width = (streamLineNum / HEIGHT * 100) + '%';
         document.getElementById('rx-status').textContent = `Decoding line ${streamLineNum}/${HEIGHT}...`;
+
+        // Mark that we have a good real-time decoded image
+        hasRealtimeImage = true;
     }
 
     // Trim processed buffer to save memory (keep last 2 lines)
@@ -1027,14 +1031,27 @@ function adjustImage() {
     document.getElementById('skew-value').textContent = skew.toFixed(1);
     document.getElementById('offset-value').textContent = offset;
 
+    // User is adjusting - clear the real-time image flag
+    hasRealtimeImage = false;
+
     renderWithAdjustments(phase, skew, offset);
 }
+
+// Track if we have a good real-time decoded image (don't overwrite with re-render at 0,0,0)
+let hasRealtimeImage = false;
 
 function resetAdjustments() {
     document.getElementById('phase-slider').value = 0;
     document.getElementById('skew-slider').value = 0;
     document.getElementById('offset-slider').value = 0;
-    adjustImage();
+    document.getElementById('phase-value').textContent = '0';
+    document.getElementById('skew-value').textContent = '0.0';
+    document.getElementById('offset-value').textContent = '0';
+
+    // Don't re-render if we have a good real-time decoded image at default values
+    if (!hasRealtimeImage) {
+        adjustImage();
+    }
 }
 
 function autoAlign() {
@@ -1105,6 +1122,9 @@ function applyAndSave() {
 function decodeSSTV(audio, onProgress, onLine) {
     console.log('Decoding', audio.length, 'samples...');
     onProgress?.('Starting decode...', 0);
+
+    // Not using real-time decode for audio file
+    hasRealtimeImage = false;
 
     // Normalize audio
     let maxAmp = 0;
@@ -1697,6 +1717,7 @@ function clearRx() {
     streamLeaderCount = 0;
     streamImageStartIdx = 0;
     streamLastProcessed = 0;
+    hasRealtimeImage = false;
 
     const canvas = document.getElementById('rx-canvas');
     const ctx = canvas.getContext('2d');
