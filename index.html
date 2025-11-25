@@ -134,7 +134,7 @@
             <div class="waveform"><canvas id="rx-wave"></canvas></div>
             <div class="progress"><div class="progress-fill" id="rx-progress"></div></div>
             <div class="status" id="rx-status">Click "Start Listening" - will auto-detect Robot36 signal</div>
-            <div class="hint" id="rx-hint">Auto mode: Waits for 1900Hz leader tone, then records ~36s</div>
+            <div class="hint" id="rx-hint">Auto mode: Waits for 1900Hz leader tone, decodes lines in real-time</div>
         </div>
         <div class="panel">
             <h2>Decoded Image</h2>
@@ -335,6 +335,21 @@ let liveYImage, liveCrImage, liveCbImage;
 let liveLineCount = 0;
 let liveCanvas, liveCtx;
 
+// ============================================
+// REAL-TIME STREAMING DECODER
+// ============================================
+let streamBuffer = new Float32Array(0);  // Accumulated audio samples
+let streamPhase = 0;  // Phase for FM demodulation
+let streamLineNum = 0;  // Current line being decoded
+let streamStarted = false;  // Whether we've detected the signal start
+let streamLeaderCount = 0;  // Count of leader samples detected
+let streamImageStartIdx = 0;  // Index where image data starts
+let streamLastProcessed = 0;  // Last processed sample index
+
+const STREAM_LINE_SAMPLES = Math.floor(LINE_DURATION * SAMPLE_RATE);
+const STREAM_BUFFER_LINES = 3;  // Buffer a few lines for reliable demodulation
+const STREAM_MIN_BUFFER = STREAM_LINE_SAMPLES * STREAM_BUFFER_LINES;
+
 function initLiveBuffers() {
     liveYImage = new Array(HEIGHT).fill(null).map(() => new Uint8Array(WIDTH).fill(128));
     liveCrImage = new Array(HEIGHT).fill(null).map(() => new Uint8Array(WIDTH).fill(128));
@@ -390,6 +405,252 @@ function renderFullImage() {
     }
 
     liveCtx.putImageData(imgData, 0, 0);
+}
+
+// ============================================
+// REAL-TIME STREAMING FUNCTIONS
+// ============================================
+
+function initStreamDecoder() {
+    streamBuffer = new Float32Array(0);
+    streamPhase = 0;
+    streamLineNum = 0;
+    streamStarted = false;
+    streamLeaderCount = 0;
+    streamImageStartIdx = 0;
+    streamLastProcessed = 0;
+    initLiveBuffers();
+}
+
+function appendToStreamBuffer(chunk) {
+    const newBuffer = new Float32Array(streamBuffer.length + chunk.length);
+    newBuffer.set(streamBuffer);
+    newBuffer.set(chunk, streamBuffer.length);
+    streamBuffer = newBuffer;
+}
+
+// Fast real-time FM demodulation using zero-crossing detection
+function demodulateRealtime(signal, startIdx, endIdx) {
+    const freqs = new Float32Array(endIdx - startIdx);
+
+    let prevSample = signal[startIdx];
+    let lastZeroCross = startIdx;
+    let currentFreq = 1900;
+
+    for (let i = startIdx + 1; i < endIdx; i++) {
+        const sample = signal[i];
+
+        // Zero crossing detection (positive going)
+        if (prevSample <= 0 && sample > 0) {
+            const period = i - lastZeroCross;
+            if (period > 0) {
+                currentFreq = SAMPLE_RATE / period;
+                // Clamp to valid SSTV range
+                currentFreq = Math.max(1000, Math.min(2500, currentFreq));
+            }
+            lastZeroCross = i;
+        }
+
+        freqs[i - startIdx] = currentFreq;
+        prevSample = sample;
+    }
+
+    // Simple smoothing
+    const smoothed = new Float32Array(freqs.length);
+    const windowSize = 15;
+    for (let i = 0; i < freqs.length; i++) {
+        let sum = 0;
+        let count = 0;
+        for (let j = Math.max(0, i - windowSize); j <= Math.min(freqs.length - 1, i + windowSize); j++) {
+            sum += freqs[j];
+            count++;
+        }
+        smoothed[i] = sum / count;
+    }
+
+    return smoothed;
+}
+
+// Process incoming audio chunk in real-time
+function processStreamChunk(chunk) {
+    appendToStreamBuffer(chunk);
+
+    // Need minimum buffer before we can reliably process
+    if (streamBuffer.length < STREAM_MIN_BUFFER) {
+        return;
+    }
+
+    // Find signal start if not started
+    if (!streamStarted) {
+        // Look for leader tone (1900 Hz)
+        const checkSamples = Math.min(chunk.length, 1000);
+        let leaderCount = 0;
+
+        // Simple zero-crossing frequency estimation on the chunk
+        let prevSample = chunk[0];
+        let lastZero = 0;
+
+        for (let i = 1; i < checkSamples; i++) {
+            if (prevSample <= 0 && chunk[i] > 0) {
+                const period = i - lastZero;
+                const freq = SAMPLE_RATE / period;
+                if (Math.abs(freq - LEADER_FREQ) < 200) {
+                    leaderCount++;
+                }
+                lastZero = i;
+            }
+            prevSample = chunk[i];
+        }
+
+        if (leaderCount > 5) {
+            streamLeaderCount++;
+            if (streamLeaderCount >= 3) {
+                streamStarted = true;
+                // Estimate where image data starts (after header)
+                const headerDuration = LEADER_DURATION + BREAK_DURATION + 10 * VIS_BIT_DURATION + BREAK_DURATION;
+                streamImageStartIdx = streamBuffer.length + Math.floor(headerDuration * SAMPLE_RATE);
+                streamLastProcessed = streamImageStartIdx;
+                document.getElementById('rx-status').textContent = 'Signal detected! Decoding in real-time...';
+            }
+        } else {
+            streamLeaderCount = Math.max(0, streamLeaderCount - 1);
+        }
+        return;
+    }
+
+    // Process any complete lines we have buffered
+    const syncSamples = Math.floor(SYNC_DURATION * SAMPLE_RATE);
+    const porchSamples = Math.floor(SYNC_PORCH_DURATION * SAMPLE_RATE);
+    const ySamples = Math.floor(Y_SCAN_DURATION * SAMPLE_RATE);
+    const sepSamples = Math.floor(SEPARATOR_DURATION * SAMPLE_RATE);
+    const colorPorchSamples = Math.floor(COLOR_PORCH_DURATION * SAMPLE_RATE);
+    const colorSamples = Math.floor(COLOR_SCAN_DURATION * SAMPLE_RATE);
+
+    while (streamLineNum < HEIGHT) {
+        const lineStart = streamImageStartIdx + streamLineNum * STREAM_LINE_SAMPLES;
+        const lineEnd = lineStart + STREAM_LINE_SAMPLES;
+
+        // Need the full line plus some buffer
+        if (lineEnd + 500 > streamBuffer.length) {
+            break;
+        }
+
+        // Demodulate this line
+        const freqs = demodulateRealtime(streamBuffer, lineStart, lineEnd + 500);
+
+        // Extract Y data
+        const yStart = syncSamples + porchSamples;
+        const yEnd = yStart + ySamples;
+
+        for (let x = 0; x < WIDTH; x++) {
+            const idx = yStart + Math.floor(x / WIDTH * (yEnd - yStart));
+            if (idx < freqs.length) {
+                liveYImage[streamLineNum][x] = freqToValue(freqs[idx]);
+            }
+        }
+
+        // Detect separator tone to determine color channel
+        const sepStart = yEnd;
+        let sepFreqSum = 0;
+        for (let s = 0; s < sepSamples && sepStart + s < freqs.length; s++) {
+            sepFreqSum += freqs[sepStart + s];
+        }
+        const avgSepFreq = sepFreqSum / sepSamples;
+        const isCrLine = avgSepFreq < 1700;
+
+        // Extract color data
+        const colorStart = yEnd + sepSamples + colorPorchSamples;
+        const colorEnd = colorStart + colorSamples;
+        const colorImg = isCrLine ? liveCrImage : liveCbImage;
+
+        for (let x = 0; x < WIDTH; x++) {
+            const idx = colorStart + Math.floor(x / WIDTH * (colorEnd - colorStart));
+            if (idx < freqs.length) {
+                colorImg[streamLineNum][x] = freqToValue(freqs[idx]);
+            }
+        }
+
+        // Interpolate the other color channel from adjacent lines
+        if (streamLineNum > 0) {
+            if (isCrLine) {
+                // Copy Cb from previous line
+                for (let x = 0; x < WIDTH; x++) {
+                    liveCbImage[streamLineNum][x] = liveCbImage[streamLineNum - 1][x];
+                }
+            } else {
+                // Copy Cr from previous line
+                for (let x = 0; x < WIDTH; x++) {
+                    liveCrImage[streamLineNum][x] = liveCrImage[streamLineNum - 1][x];
+                }
+            }
+        }
+
+        streamLineNum++;
+        liveLineCount = streamLineNum;
+
+        // Render this line immediately
+        renderLiveLine(streamLineNum);
+        updateLineIndicator(streamLineNum);
+
+        // Update progress
+        document.getElementById('rx-progress').style.width = (streamLineNum / HEIGHT * 100) + '%';
+        document.getElementById('rx-status').textContent = `Decoding line ${streamLineNum}/${HEIGHT}...`;
+    }
+
+    // Trim processed buffer to save memory (keep last 2 lines)
+    if (streamLineNum > 2) {
+        const keepFrom = streamImageStartIdx + (streamLineNum - 2) * STREAM_LINE_SAMPLES;
+        if (keepFrom > 0 && keepFrom < streamBuffer.length) {
+            const newBuffer = new Float32Array(streamBuffer.length - keepFrom);
+            newBuffer.set(streamBuffer.subarray(keepFrom));
+            streamBuffer = newBuffer;
+            streamImageStartIdx -= keepFrom;
+        }
+    }
+
+    // Check if complete
+    if (streamLineNum >= HEIGHT) {
+        // Store for adjustment controls
+        decodedFreqs = null;  // Will be populated by full decode if needed
+        decodedLinesCount = streamLineNum;
+
+        document.getElementById('rx-status').textContent = `Complete! Decoded ${streamLineNum} lines`;
+        document.getElementById('rx-save').disabled = false;
+
+        // Stop recording
+        setTimeout(() => {
+            if (isListening) {
+                finishStreamDecode();
+            }
+        }, 500);
+    }
+}
+
+function finishStreamDecode() {
+    stopListening();
+
+    // Store the full buffer for adjustment controls
+    if (rxChunks.length > 0) {
+        const totalLen = rxChunks.reduce((s, c) => s + c.length, 0);
+        const combined = new Float32Array(totalLen);
+        let offset = 0;
+        for (const chunk of rxChunks) {
+            combined.set(chunk, offset);
+            offset += chunk.length;
+        }
+
+        // Run full FM demodulation for adjustment panel
+        setTimeout(() => {
+            try {
+                decodedFreqs = demodulateFFM(combined, null);
+                decodedImageStart = detectSignalStart(decodedFreqs);
+                document.getElementById('adjust-panel').style.display = 'block';
+                resetAdjustments();
+            } catch (e) {
+                console.error('Post-decode adjustment prep failed:', e);
+            }
+        }, 100);
+    }
 }
 
 // ============================================
@@ -1000,10 +1261,10 @@ function setMode(mode) {
     document.getElementById('mode-manual').classList.toggle('active', mode === 'manual');
 
     if (mode === 'auto') {
-        document.getElementById('rx-hint').textContent = 'Auto mode: Waits for 1900Hz leader tone, then records ~36s';
+        document.getElementById('rx-hint').textContent = 'Auto mode: Waits for 1900Hz leader tone, decodes lines in real-time';
         document.getElementById('rx-status').textContent = 'Click "Start Listening" - will auto-detect Robot36 signal';
     } else {
-        document.getElementById('rx-hint').textContent = 'Manual mode: Click Stop & Decode when transmission ends';
+        document.getElementById('rx-hint').textContent = 'Manual mode: Decodes in real-time, click Stop when done';
         document.getElementById('rx-status').textContent = 'Click "Start Listening" to begin recording';
     }
 }
@@ -1115,27 +1376,34 @@ async function startListening() {
         signalStartTime = null;
         leaderDetectCount = 0;
 
+        // Initialize real-time streaming decoder
+        initStreamDecoder();
+
         rxProcessor.onaudioprocess = e => {
             if (!isListening) return;
 
             const chunk = new Float32Array(e.inputBuffer.getChannelData(0));
+            rxChunks.push(chunk);
 
-            if (rxMode === 'auto') {
-                if (!signalDetected) {
-                    rxChunks.push(chunk);
-                    if (rxChunks.length > 20) rxChunks.shift();
-                } else {
-                    rxChunks.push(chunk);
+            // Real-time streaming decode
+            processStreamChunk(chunk);
 
-                    const totalSamples = rxChunks.reduce((s, c) => s + c.length, 0);
-                    const recordedTime = totalSamples / SAMPLE_RATE;
+            // Auto-stop check
+            if (rxMode === 'auto' && streamLineNum >= HEIGHT) {
+                // Already handled in processStreamChunk
+                return;
+            }
 
-                    if (recordedTime > TOTAL_DURATION + 2) {
-                        stopAndDecode();
-                    }
-                }
-            } else {
-                rxChunks.push(chunk);
+            // Manual mode - just keep recording
+            if (rxMode === 'manual') {
+                return;
+            }
+
+            // Fallback auto-stop after max duration
+            const totalSamples = rxChunks.reduce((s, c) => s + c.length, 0);
+            const recordedTime = totalSamples / SAMPLE_RATE;
+            if (recordedTime > TOTAL_DURATION + 5) {
+                finishStreamDecode();
             }
         };
 
@@ -1189,6 +1457,39 @@ function stopListening() {
 function stopAndDecode() {
     stopListening();
 
+    // If we have real-time decoded lines, use those
+    if (streamLineNum > 0) {
+        document.getElementById('rx-status').textContent = `Decoded ${streamLineNum}/${HEIGHT} lines`;
+        document.getElementById('rx-save').disabled = false;
+
+        // Prepare adjustment controls with full decode
+        if (rxChunks.length > 0) {
+            const totalLen = rxChunks.reduce((s, c) => s + c.length, 0);
+            const combined = new Float32Array(totalLen);
+            let offset = 0;
+            for (const chunk of rxChunks) {
+                combined.set(chunk, offset);
+                offset += chunk.length;
+            }
+
+            setTimeout(() => {
+                try {
+                    document.getElementById('rx-status').textContent = 'Preparing adjustment controls...';
+                    decodedFreqs = demodulateFFM(combined, null);
+                    decodedImageStart = detectSignalStart(decodedFreqs);
+                    document.getElementById('adjust-panel').style.display = 'block';
+                    resetAdjustments();
+                    document.getElementById('rx-status').textContent = `Decoded ${streamLineNum}/${HEIGHT} lines - adjust alignment below`;
+                } catch (e) {
+                    console.error('Adjustment prep failed:', e);
+                    document.getElementById('rx-status').textContent = `Decoded ${streamLineNum}/${HEIGHT} lines`;
+                }
+            }, 100);
+        }
+        return;
+    }
+
+    // Fallback: if no real-time lines, run full decode
     if (rxChunks.length > 0) {
         runDecode();
     }
@@ -1272,15 +1573,18 @@ function updateRxDisplay() {
             }
         }
 
-        if (signalDetected || rxMode === 'manual') {
+        // If streaming decode is active, the status is already being updated
+        if (streamStarted && streamLineNum > 0 && streamLineNum < HEIGHT) {
+            // Status is updated by processStreamChunk
+        } else if (signalDetected || rxMode === 'manual') {
             const totalSamples = rxChunks.reduce((s, c) => s + c.length, 0);
             const secs = totalSamples / SAMPLE_RATE;
 
-            if (rxMode === 'auto') {
+            if (rxMode === 'auto' && !streamStarted) {
                 const remaining = Math.max(0, TOTAL_DURATION - secs);
                 document.getElementById('rx-status').textContent = `Recording: ${secs.toFixed(1)}s (${remaining.toFixed(1)}s remaining)`;
                 document.getElementById('rx-progress').style.width = Math.min(100, secs / TOTAL_DURATION * 100) + '%';
-            } else {
+            } else if (rxMode === 'manual') {
                 document.getElementById('rx-status').textContent = `Recording: ${secs.toFixed(1)}s`;
                 document.getElementById('rx-progress').style.width = Math.min(100, secs / 60 * 100) + '%';
             }
@@ -1384,6 +1688,15 @@ function clearRx() {
     liveLineCount = 0;
     decodedFreqs = null;
     decodedImageStart = 0;
+
+    // Reset streaming decoder state
+    streamBuffer = new Float32Array(0);
+    streamPhase = 0;
+    streamLineNum = 0;
+    streamStarted = false;
+    streamLeaderCount = 0;
+    streamImageStartIdx = 0;
+    streamLastProcessed = 0;
 
     const canvas = document.getElementById('rx-canvas');
     const ctx = canvas.getContext('2d');
