@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SSTV Robot36 - Online TX/RX</title>
+    <title>SSTV Robot36</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -15,21 +15,18 @@
         .tabs {
             display: flex;
             background: rgba(0,0,0,0.3);
-            border-bottom: 1px solid rgba(255,255,255,0.1);
         }
         .tab {
             flex: 1;
             padding: 1rem;
             text-align: center;
             cursor: pointer;
-            transition: all 0.3s;
             border-bottom: 3px solid transparent;
         }
         .tab:hover { background: rgba(255,255,255,0.05); }
-        .tab.active.tx { border-color: #ff6b6b; background: rgba(255,107,107,0.1); }
-        .tab.active.rx { border-color: #4ecdc4; background: rgba(78,205,196,0.1); }
-        .tab-content { display: none; padding: 1rem; max-width: 900px; margin: 0 auto; }
-        .tab-content.active { display: block; }
+        .tab.active { border-color: #4ecdc4; background: rgba(78,205,196,0.1); }
+        .content { display: none; padding: 1rem; max-width: 800px; margin: 0 auto; }
+        .content.active { display: block; }
         .panel {
             background: rgba(255,255,255,0.05);
             border: 1px solid rgba(255,255,255,0.1);
@@ -37,889 +34,306 @@
             padding: 1.5rem;
             margin-bottom: 1rem;
         }
-        .panel h2 {
-            font-size: 0.9rem;
-            color: #8892b0;
-            margin-bottom: 1rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
+        .panel h2 { font-size: 0.9rem; color: #8892b0; margin-bottom: 1rem; text-transform: uppercase; }
         .image-box {
-            width: 100%;
-            max-width: 400px;
-            aspect-ratio: 4/3;
-            background: rgba(0,0,0,0.3);
-            border: 2px dashed rgba(255,255,255,0.2);
+            width: 320px;
+            height: 240px;
+            background: #000;
+            border: 2px solid rgba(255,255,255,0.2);
             border-radius: 8px;
+            margin: 0 auto;
             display: flex;
             align-items: center;
             justify-content: center;
-            cursor: pointer;
-            transition: all 0.3s;
             overflow: hidden;
-            margin: 0 auto;
+            cursor: pointer;
         }
-        .image-box:hover { border-color: #4ecdc4; }
-        .image-box img, .image-box canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
-        .placeholder { text-align: center; color: #8892b0; }
-        .placeholder span { font-size: 3rem; display: block; margin-bottom: 0.5rem; }
+        .image-box img, .image-box canvas { max-width: 100%; max-height: 100%; }
+        .placeholder { color: #8892b0; text-align: center; }
         .controls { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 1rem; justify-content: center; }
         button {
-            background: linear-gradient(135deg, #4ecdc4, #44a08d);
+            background: #4ecdc4;
             color: #fff;
             border: none;
             padding: 0.75rem 1.5rem;
             border-radius: 8px;
-            font-size: 1rem;
             cursor: pointer;
-            transition: all 0.3s;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
         }
-        button:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(78,205,196,0.4); }
-        button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
-        button.tx-btn { background: linear-gradient(135deg, #ff6b6b, #ee5a5a); }
-        button.tx-btn:hover { box-shadow: 0 5px 20px rgba(255,107,107,0.4); }
+        button:hover { background: #3dbdb5; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
         button.secondary { background: rgba(255,255,255,0.1); }
-        button.secondary:hover { background: rgba(255,255,255,0.2); box-shadow: none; }
-        button.recording { animation: pulse 1s infinite; }
-        @keyframes pulse { 0%,100%{ opacity:1; } 50%{ opacity:0.6; } }
-        .status {
-            padding: 0.5rem 1rem;
-            border-radius: 20px;
-            font-size: 0.85rem;
-            background: rgba(255,255,255,0.1);
-            text-align: center;
-            margin-top: 1rem;
-        }
-        .waveform {
-            height: 80px;
-            background: rgba(0,0,0,0.3);
-            border-radius: 8px;
-            margin-top: 1rem;
-        }
+        .status { text-align: center; margin-top: 1rem; color: #8892b0; }
+        .waveform { height: 60px; background: #000; border-radius: 8px; margin-top: 1rem; }
         .waveform canvas { width: 100%; height: 100%; }
-        .progress-bar {
-            height: 6px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 3px;
-            margin-top: 1rem;
-            overflow: hidden;
-        }
-        .progress-bar .fill {
-            height: 100%;
-            background: linear-gradient(90deg, #4ecdc4, #44a08d);
-            width: 0%;
-            transition: width 0.1s;
-        }
-        .progress-bar.tx .fill { background: linear-gradient(90deg, #ff6b6b, #ee5a5a); }
-        .freq-display {
-            font-family: 'Courier New', monospace;
-            font-size: 1.5rem;
-            color: #4ecdc4;
-            text-align: center;
-            padding: 0.5rem;
-            background: rgba(0,0,0,0.3);
-            border-radius: 8px;
-            margin-top: 1rem;
-        }
+        .progress { height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; margin-top: 0.5rem; }
+        .progress-fill { height: 100%; background: #4ecdc4; width: 0%; transition: width 0.1s; }
         input[type="file"] { display: none; }
-        .info { font-size: 0.8rem; color: #8892b0; text-align: center; margin-top: 0.5rem; }
-        .spectrogram { height: 100px; background: rgba(0,0,0,0.3); border-radius: 8px; margin-top: 0.5rem; }
-        .spectrogram canvas { width: 100%; height: 100%; }
     </style>
 </head>
 <body>
     <div class="tabs">
-        <div class="tab tx active" onclick="switchTab('tx')">📡 Transmit (TX)</div>
-        <div class="tab rx" onclick="switchTab('rx')">📻 Receive (RX)</div>
+        <div class="tab active" onclick="showTab('tx')">📡 TX (Encode)</div>
+        <div class="tab" onclick="showTab('rx')">📻 RX (Decode)</div>
     </div>
 
-    <!-- TX Tab -->
-    <div id="tx-tab" class="tab-content active">
+    <div id="tx" class="content active">
         <div class="panel">
-            <h2>Source Image</h2>
-            <div class="image-box" id="tx-image-box" onclick="document.getElementById('fileInput').click()">
-                <div class="placeholder" id="tx-placeholder">
-                    <span>📷</span>
-                    <p>Click to upload image</p>
-                </div>
-                <canvas id="tx-canvas" style="display:none;"></canvas>
+            <h2>Image</h2>
+            <div class="image-box" onclick="document.getElementById('file').click()">
+                <canvas id="tx-canvas" width="320" height="240" style="display:none;"></canvas>
+                <div class="placeholder" id="tx-placeholder">Click to upload</div>
             </div>
-            <input type="file" id="fileInput" accept="image/*">
+            <input type="file" id="file" accept="image/*">
             <div class="controls">
-                <button class="secondary" onclick="document.getElementById('fileInput').click()">📁 Upload</button>
-                <button class="secondary" id="cameraBtn" onclick="toggleCamera()">📸 Camera</button>
+                <button onclick="document.getElementById('file').click()" class="secondary">📁 Upload</button>
             </div>
         </div>
-
         <div class="panel">
             <h2>Transmit</h2>
             <div class="controls">
-                <button class="tx-btn" id="txBtn" onclick="startTX()" disabled>📡 Transmit Audio</button>
-                <button class="secondary" id="stopTxBtn" onclick="stopTX()" disabled>⏹ Stop</button>
+                <button id="tx-btn" onclick="transmit()" disabled>📡 Transmit</button>
+                <button id="tx-stop" onclick="stopTx()" disabled class="secondary">⏹ Stop</button>
             </div>
-            <div class="waveform"><canvas id="tx-waveform"></canvas></div>
-            <div class="progress-bar tx"><div class="fill" id="tx-progress"></div></div>
-            <div class="status" id="tx-status">Upload an image to begin</div>
+            <div class="waveform"><canvas id="tx-wave"></canvas></div>
+            <div class="progress"><div class="progress-fill" id="tx-progress"></div></div>
+            <div class="status" id="tx-status">Upload an image</div>
         </div>
     </div>
 
-    <!-- RX Tab -->
-    <div id="rx-tab" class="tab-content">
+    <div id="rx" class="content">
         <div class="panel">
-            <h2>Receive</h2>
+            <h2>Record</h2>
             <div class="controls">
-                <button id="rxBtn" onclick="startRX()">🎙️ Start Listening</button>
-                <button class="secondary" id="stopRxBtn" onclick="stopRX()" disabled>⏹ Stop</button>
-                <button class="secondary" id="decodeBtn" onclick="decodeAudio()" disabled>🔍 Decode</button>
+                <button id="rx-btn" onclick="startRx()">🎙️ Start Recording</button>
+                <button id="rx-stop" onclick="stopRx()" disabled class="secondary">⏹ Stop</button>
+                <button id="rx-decode" onclick="decode()" disabled class="secondary">🔍 Decode</button>
             </div>
-            <div class="waveform"><canvas id="rx-waveform"></canvas></div>
-            <div class="freq-display" id="freq-display">-- Hz</div>
-            <div class="spectrogram"><canvas id="spectrogram"></canvas></div>
-            <div class="progress-bar"><div class="fill" id="rx-progress"></div></div>
-            <div class="status" id="rx-status">Click Start Listening to begin</div>
-            <div class="info" id="rx-info">Recording: 0.0s</div>
+            <div class="waveform"><canvas id="rx-wave"></canvas></div>
+            <div class="status" id="rx-status">Click Start Recording</div>
         </div>
-
         <div class="panel">
             <h2>Decoded Image</h2>
-            <div class="image-box" id="rx-image-box" style="cursor:default; border-style:solid;">
-                <div class="placeholder" id="rx-placeholder">
-                    <span>📺</span>
-                    <p>Decoded image will appear here</p>
-                </div>
-                <canvas id="rx-canvas" style="display:none;" width="320" height="240"></canvas>
+            <div class="image-box" style="cursor:default;">
+                <canvas id="rx-canvas" width="320" height="240" style="display:none;"></canvas>
+                <div class="placeholder" id="rx-placeholder">Image will appear here</div>
             </div>
             <div class="controls">
-                <button class="secondary" id="saveBtn" onclick="saveImage()" disabled>💾 Save Image</button>
+                <button id="rx-save" onclick="saveImage()" disabled class="secondary">💾 Save</button>
             </div>
         </div>
     </div>
 
     <script>
-    // ============================================
-    // SSTV Robot36 - Pure JavaScript Implementation
-    // ============================================
+        const API = window.location.origin;
+        let audioCtx, txSource, rxStream, rxChunks = [], isRecording = false, analyser;
 
-    const SAMPLE_RATE = 44100;
-    const WIDTH = 320;
-    const HEIGHT = 240;
-
-    // Frequencies
-    const FREQ_BLACK = 1500;
-    const FREQ_WHITE = 2300;
-    const FREQ_SYNC = 1200;
-    const FREQ_VIS_1 = 1100;
-    const FREQ_VIS_0 = 1300;
-    const LEADER_FREQ = 1900;
-    const VIS_CODE = 8;
-
-    // Timing (seconds)
-    const LEADER_DURATION = 0.300;
-    const BREAK_DURATION = 0.010;
-    const VIS_BIT_DURATION = 0.030;
-    const SYNC_DURATION = 0.009;
-    const SYNC_PORCH_DURATION = 0.003;
-    const Y_SCAN_DURATION = 0.088;
-    const SEPARATOR_DURATION = 0.0045;
-    const COLOR_PORCH_DURATION = 0.0015;
-    const COLOR_SCAN_DURATION = 0.044;
-
-    // Global state
-    let audioCtx = null;
-    let txSource = null;
-    let rxStream = null;
-    let rxProcessor = null;
-    let rxAnalyser = null;
-    let rxBuffer = [];
-    let isTxPlaying = false;
-    let isRxRecording = false;
-    let imageData = null;
-    let cameraStream = null;
-
-    // ============================================
-    // Tab Switching
-    // ============================================
-    function switchTab(tab) {
-        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-        document.querySelector(`.tab.${tab}`).classList.add('active');
-        document.getElementById(`${tab}-tab`).classList.add('active');
-    }
-
-    // ============================================
-    // Image Loading
-    // ============================================
-    document.getElementById('fileInput').addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (file) loadImageFile(file);
-    });
-
-    function loadImageFile(file) {
-        const img = new Image();
-        img.onload = () => {
-            const canvas = document.getElementById('tx-canvas');
-            canvas.width = WIDTH;
-            canvas.height = HEIGHT;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0, WIDTH, HEIGHT);
-            canvas.style.display = 'block';
-            document.getElementById('tx-placeholder').style.display = 'none';
-            imageData = ctx.getImageData(0, 0, WIDTH, HEIGHT);
-            document.getElementById('txBtn').disabled = false;
-            document.getElementById('tx-status').textContent = 'Ready to transmit';
-            if (cameraStream) toggleCamera();
-        };
-        img.src = URL.createObjectURL(file);
-    }
-
-    async function toggleCamera() {
-        const video = document.createElement('video');
-        if (cameraStream) {
-            cameraStream.getTracks().forEach(t => t.stop());
-            cameraStream = null;
-            document.getElementById('cameraBtn').textContent = '📸 Camera';
-            return;
+        function showTab(id) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.content').forEach(c => c.classList.remove('active'));
+            document.querySelector(`.tab:nth-child(${id === 'tx' ? 1 : 2})`).classList.add('active');
+            document.getElementById(id).classList.add('active');
         }
-        try {
-            cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-            video.srcObject = cameraStream;
-            video.play();
-            document.getElementById('cameraBtn').textContent = '📷 Capture';
-            document.getElementById('cameraBtn').onclick = () => {
+
+        // TX: Load image
+        document.getElementById('file').onchange = e => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const img = new Image();
+            img.onload = () => {
                 const canvas = document.getElementById('tx-canvas');
-                canvas.width = WIDTH;
-                canvas.height = HEIGHT;
                 const ctx = canvas.getContext('2d');
-                ctx.drawImage(video, 0, 0, WIDTH, HEIGHT);
+                ctx.drawImage(img, 0, 0, 320, 240);
                 canvas.style.display = 'block';
                 document.getElementById('tx-placeholder').style.display = 'none';
-                imageData = ctx.getImageData(0, 0, WIDTH, HEIGHT);
-                document.getElementById('txBtn').disabled = false;
+                document.getElementById('tx-btn').disabled = false;
                 document.getElementById('tx-status').textContent = 'Ready to transmit';
-                cameraStream.getTracks().forEach(t => t.stop());
-                cameraStream = null;
-                document.getElementById('cameraBtn').textContent = '📸 Camera';
-                document.getElementById('cameraBtn').onclick = toggleCamera;
             };
-        } catch (err) {
-            alert('Camera error: ' + err.message);
-        }
-    }
+            img.src = URL.createObjectURL(file);
+        };
 
-    // ============================================
-    // Color Conversion
-    // ============================================
-    function rgbToYCrCb(r, g, b) {
-        const y = 16 + 65.481 * r / 255 + 128.553 * g / 255 + 24.966 * b / 255;
-        const cr = 128 + 112.0 * r / 255 - 93.786 * g / 255 - 18.214 * b / 255;
-        const cb = 128 - 37.797 * r / 255 - 74.203 * g / 255 + 112.0 * b / 255;
-        return [Math.max(0, Math.min(255, y)), Math.max(0, Math.min(255, cr)), Math.max(0, Math.min(255, cb))];
-    }
+        // TX: Encode and play
+        async function transmit() {
+            document.getElementById('tx-status').textContent = 'Encoding...';
+            document.getElementById('tx-btn').disabled = true;
 
-    function yCrCbToRgb(y, cr, cb) {
-        const r = 298.082 * (y - 16) / 256 + 408.583 * (cr - 128) / 256;
-        const g = 298.082 * (y - 16) / 256 - 208.120 * (cr - 128) / 256 - 100.291 * (cb - 128) / 256;
-        const b = 298.082 * (y - 16) / 256 + 516.411 * (cb - 128) / 256;
-        return [Math.max(0, Math.min(255, r)), Math.max(0, Math.min(255, g)), Math.max(0, Math.min(255, b))];
-    }
+            const canvas = document.getElementById('tx-canvas');
+            const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+            const formData = new FormData();
+            formData.append('image', blob);
 
-    // ============================================
-    // SSTV Encoder
-    // ============================================
-    function encodeSSTV(imgData) {
-        const samples = [];
-        let phase = 0;
+            try {
+                const res = await fetch(API + '/api/encode', { method: 'POST', body: formData });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
 
-        function addTone(freq, duration) {
-            const numSamples = Math.floor(duration * SAMPLE_RATE);
-            for (let i = 0; i < numSamples; i++) {
-                samples.push(Math.sin(phase));
-                phase += 2 * Math.PI * freq / SAMPLE_RATE;
-            }
-        }
+                // Decode base64 WAV and play
+                const wavBytes = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0));
+                audioCtx = new AudioContext({ sampleRate: data.sample_rate });
+                const audioBuffer = await audioCtx.decodeAudioData(wavBytes.buffer);
 
-        function addScanLine(values, duration) {
-            const numSamples = Math.floor(duration * SAMPLE_RATE);
-            for (let i = 0; i < numSamples; i++) {
-                const idx = Math.floor(i / numSamples * values.length);
-                const val = values[Math.min(idx, values.length - 1)];
-                const freq = FREQ_BLACK + (val / 255) * (FREQ_WHITE - FREQ_BLACK);
-                samples.push(Math.sin(phase));
-                phase += 2 * Math.PI * freq / SAMPLE_RATE;
-            }
-        }
+                txSource = audioCtx.createBufferSource();
+                txSource.buffer = audioBuffer;
+                analyser = audioCtx.createAnalyser();
+                txSource.connect(analyser);
+                analyser.connect(audioCtx.destination);
 
-        // Header
-        addTone(LEADER_FREQ, LEADER_DURATION);
-        addTone(FREQ_SYNC, BREAK_DURATION);
+                document.getElementById('tx-stop').disabled = false;
+                document.getElementById('tx-status').textContent = 'Transmitting...';
 
-        // VIS code
-        addTone(FREQ_VIS_1, VIS_BIT_DURATION); // Start bit
-        let parity = 0;
-        for (let i = 0; i < 7; i++) {
-            const bit = (VIS_CODE >> i) & 1;
-            parity ^= bit;
-            addTone(bit ? FREQ_VIS_1 : FREQ_VIS_0, VIS_BIT_DURATION);
-        }
-        addTone(parity ? FREQ_VIS_1 : FREQ_VIS_0, VIS_BIT_DURATION);
-        addTone(FREQ_VIS_0, VIS_BIT_DURATION); // Stop bit
-        addTone(FREQ_SYNC, BREAK_DURATION);
+                const startTime = audioCtx.currentTime;
+                const duration = audioBuffer.duration;
 
-        // Convert image to YCrCb
-        const ycrcb = [];
-        for (let row = 0; row < HEIGHT; row++) {
-            const yRow = [], crRow = [], cbRow = [];
-            for (let col = 0; col < WIDTH; col++) {
-                const idx = (row * WIDTH + col) * 4;
-                const [y, cr, cb] = rgbToYCrCb(imgData.data[idx], imgData.data[idx + 1], imgData.data[idx + 2]);
-                yRow.push(y);
-                crRow.push(cr);
-                cbRow.push(cb);
-            }
-            ycrcb.push({ y: yRow, cr: crRow, cb: cbRow });
-        }
-
-        // Scan lines
-        for (let line = 0; line < HEIGHT; line++) {
-            const isEven = line % 2 === 0;
-
-            // Sync
-            addTone(FREQ_SYNC, SYNC_DURATION);
-            addTone(FREQ_BLACK, SYNC_PORCH_DURATION);
-
-            // Y scan
-            addScanLine(ycrcb[line].y, Y_SCAN_DURATION);
-
-            // Separator
-            addTone(isEven ? FREQ_BLACK : FREQ_WHITE, SEPARATOR_DURATION);
-            addTone(FREQ_BLACK, COLOR_PORCH_DURATION);
-
-            // Color scan (Cb for even, Cr for odd) - swapped to match decoder
-            addScanLine(isEven ? ycrcb[line].cb : ycrcb[line].cr, COLOR_SCAN_DURATION);
-        }
-
-        return new Float32Array(samples);
-    }
-
-    // ============================================
-    // SSTV Decoder
-    // ============================================
-    function decodeSSTV(audioData) {
-        console.log('Decoding', audioData.length, 'samples');
-
-        // FM demodulation using phase derivative
-        const freqs = fmDemodulate(audioData);
-
-        // Find sync pulses
-        const syncPulses = findSyncPulses(freqs);
-        console.log('Found', syncPulses.length, 'sync pulses');
-
-        if (syncPulses.length < 10) {
-            console.log('Not enough sync pulses found');
-            return null;
-        }
-
-        // Decode image
-        const yImage = new Array(HEIGHT).fill(null).map(() => new Uint8Array(WIDTH).fill(128));
-        const crImage = new Array(HEIGHT).fill(null).map(() => new Uint8Array(WIDTH).fill(128));
-        const cbImage = new Array(HEIGHT).fill(null).map(() => new Uint8Array(WIDTH).fill(128));
-
-        const lineSamples = Math.floor((SYNC_DURATION + SYNC_PORCH_DURATION + Y_SCAN_DURATION +
-            SEPARATOR_DURATION + COLOR_PORCH_DURATION + COLOR_SCAN_DURATION) * SAMPLE_RATE);
-
-        let linesDecoded = 0;
-        for (let i = 0; i < syncPulses.length && linesDecoded < HEIGHT; i++) {
-            const syncPos = syncPulses[i];
-            if (syncPos + lineSamples > freqs.length) break;
-
-            const yStart = syncPos + Math.floor((SYNC_DURATION + SYNC_PORCH_DURATION) * SAMPLE_RATE);
-            const yEnd = yStart + Math.floor(Y_SCAN_DURATION * SAMPLE_RATE);
-            const colorStart = yEnd + Math.floor((SEPARATOR_DURATION + COLOR_PORCH_DURATION) * SAMPLE_RATE);
-            const colorEnd = colorStart + Math.floor(COLOR_SCAN_DURATION * SAMPLE_RATE);
-
-            // Extract Y - average over pixel width for better quality
-            const ySamplesPerPixel = (yEnd - yStart) / WIDTH;
-            for (let x = 0; x < WIDTH; x++) {
-                const startIdx = yStart + Math.floor(x * ySamplesPerPixel);
-                const endIdx = yStart + Math.floor((x + 1) * ySamplesPerPixel);
-                let sum = 0, count = 0;
-                for (let j = startIdx; j < endIdx && j < freqs.length; j++) {
-                    sum += freqs[j];
-                    count++;
+                function update() {
+                    if (!txSource) return;
+                    const elapsed = audioCtx.currentTime - startTime;
+                    document.getElementById('tx-progress').style.width = Math.min(100, elapsed / duration * 100) + '%';
+                    drawWaveform('tx-wave', analyser);
+                    if (elapsed < duration) requestAnimationFrame(update);
                 }
-                yImage[linesDecoded][x] = freqToPixel(count > 0 ? sum / count : 1900);
-            }
 
-            // Extract color - average over pixel width
-            const isEven = linesDecoded % 2 === 0;
-            const colorImg = isEven ? cbImage : crImage;
-            const colorSamplesPerPixel = (colorEnd - colorStart) / WIDTH;
-            for (let x = 0; x < WIDTH; x++) {
-                const startIdx = colorStart + Math.floor(x * colorSamplesPerPixel);
-                const endIdx = colorStart + Math.floor((x + 1) * colorSamplesPerPixel);
-                let sum = 0, count = 0;
-                for (let j = startIdx; j < endIdx && j < freqs.length; j++) {
-                    sum += freqs[j];
-                    count++;
+                txSource.onended = () => {
+                    document.getElementById('tx-status').textContent = 'Done!';
+                    document.getElementById('tx-btn').disabled = false;
+                    document.getElementById('tx-stop').disabled = true;
+                    document.getElementById('tx-progress').style.width = '100%';
+                    txSource = null;
+                };
+
+                txSource.start();
+                update();
+            } catch (err) {
+                document.getElementById('tx-status').textContent = 'Error: ' + err.message;
+                document.getElementById('tx-btn').disabled = false;
+            }
+        }
+
+        function stopTx() {
+            if (txSource) { txSource.stop(); txSource = null; }
+            document.getElementById('tx-btn').disabled = false;
+            document.getElementById('tx-stop').disabled = true;
+            document.getElementById('tx-status').textContent = 'Stopped';
+        }
+
+        // RX: Record audio
+        async function startRx() {
+            try {
+                rxStream = await navigator.mediaDevices.getUserMedia({
+                    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+                });
+                audioCtx = new AudioContext({ sampleRate: 44100 });
+                const source = audioCtx.createMediaStreamSource(rxStream);
+                analyser = audioCtx.createAnalyser();
+                const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+
+                source.connect(analyser);
+                analyser.connect(processor);
+                processor.connect(audioCtx.destination);
+
+                rxChunks = [];
+                isRecording = true;
+
+                processor.onaudioprocess = e => {
+                    if (isRecording) {
+                        rxChunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+                    }
+                };
+
+                document.getElementById('rx-btn').disabled = true;
+                document.getElementById('rx-stop').disabled = false;
+                document.getElementById('rx-status').textContent = 'Recording...';
+
+                function updateRx() {
+                    if (!isRecording) return;
+                    drawWaveform('rx-wave', analyser);
+                    const secs = rxChunks.reduce((s, c) => s + c.length, 0) / 44100;
+                    document.getElementById('rx-status').textContent = `Recording: ${secs.toFixed(1)}s`;
+                    requestAnimationFrame(updateRx);
                 }
-                colorImg[linesDecoded][x] = freqToPixel(count > 0 ? sum / count : 1900);
-            }
-
-            linesDecoded++;
-        }
-
-        console.log('Decoded', linesDecoded, 'lines');
-
-        // Interpolate missing color channels
-        for (let i = 0; i < linesDecoded; i++) {
-            const isEven = i % 2 === 0;
-            if (isEven && i > 0) {
-                crImage[i] = crImage[i - 1].slice();
-            } else if (!isEven && i > 0) {
-                cbImage[i] = cbImage[i - 1].slice();
+                updateRx();
+            } catch (err) {
+                document.getElementById('rx-status').textContent = 'Mic error: ' + err.message;
             }
         }
 
-        // Convert to RGB
-        const canvas = document.getElementById('rx-canvas');
-        const ctx = canvas.getContext('2d');
-        const imgData = ctx.createImageData(WIDTH, HEIGHT);
+        function stopRx() {
+            isRecording = false;
+            if (rxStream) { rxStream.getTracks().forEach(t => t.stop()); rxStream = null; }
+            document.getElementById('rx-btn').disabled = false;
+            document.getElementById('rx-stop').disabled = true;
+            document.getElementById('rx-decode').disabled = rxChunks.length === 0;
+            document.getElementById('rx-status').textContent = 'Ready to decode';
+        }
 
-        for (let y = 0; y < HEIGHT; y++) {
-            for (let x = 0; x < WIDTH; x++) {
-                const [r, g, b] = yCrCbToRgb(yImage[y][x], crImage[y][x], cbImage[y][x]);
-                const idx = (y * WIDTH + x) * 4;
-                imgData.data[idx] = r;
-                imgData.data[idx + 1] = g;
-                imgData.data[idx + 2] = b;
-                imgData.data[idx + 3] = 255;
+        // RX: Decode
+        async function decode() {
+            document.getElementById('rx-status').textContent = 'Decoding...';
+            document.getElementById('rx-decode').disabled = true;
+
+            // Combine chunks
+            const totalLen = rxChunks.reduce((s, c) => s + c.length, 0);
+            const combined = new Float32Array(totalLen);
+            let offset = 0;
+            for (const chunk of rxChunks) { combined.set(chunk, offset); offset += chunk.length; }
+
+            // Send to server
+            const audioB64 = btoa(String.fromCharCode(...new Uint8Array(combined.buffer)));
+
+            try {
+                const res = await fetch(API + '/api/decode', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ audio: audioB64, sample_rate: 44100 })
+                });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+
+                // Display image
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.getElementById('rx-canvas');
+                    canvas.getContext('2d').drawImage(img, 0, 0);
+                    canvas.style.display = 'block';
+                    document.getElementById('rx-placeholder').style.display = 'none';
+                    document.getElementById('rx-save').disabled = false;
+                };
+                img.src = 'data:image/png;base64,' + data.image;
+                document.getElementById('rx-status').textContent = 'Decoded!';
+            } catch (err) {
+                document.getElementById('rx-status').textContent = 'Error: ' + err.message;
             }
+            document.getElementById('rx-decode').disabled = false;
         }
 
-        return imgData;
-    }
-
-    function fmDemodulate(samples) {
-        // Bandpass filter the signal first (1000-2500 Hz)
-        const filtered = bandpassFilter(samples, 1000, 2500);
-
-        // Compute analytic signal using Hilbert transform approximation
-        const analytic = hilbertTransform(filtered);
-
-        // Compute instantaneous frequency from phase derivative
-        const freqs = new Float32Array(samples.length);
-        let prevPhase = 0;
-
-        for (let i = 0; i < samples.length; i++) {
-            const phase = Math.atan2(analytic.imag[i], analytic.real[i]);
-            let phaseDiff = phase - prevPhase;
-
-            // Unwrap phase
-            while (phaseDiff > Math.PI) phaseDiff -= 2 * Math.PI;
-            while (phaseDiff < -Math.PI) phaseDiff += 2 * Math.PI;
-
-            freqs[i] = Math.abs(phaseDiff * SAMPLE_RATE / (2 * Math.PI));
-            prevPhase = phase;
+        function saveImage() {
+            const canvas = document.getElementById('rx-canvas');
+            const link = document.createElement('a');
+            link.download = 'sstv_' + Date.now() + '.png';
+            link.href = canvas.toDataURL();
+            link.click();
         }
 
-        // Smooth the frequency estimate
-        return smoothArray(freqs, 5);
-    }
-
-    function bandpassFilter(samples, lowFreq, highFreq) {
-        // Simple FIR bandpass filter
-        const filtered = new Float32Array(samples.length);
-        const fc1 = lowFreq / SAMPLE_RATE;
-        const fc2 = highFreq / SAMPLE_RATE;
-        const n = 64; // Filter order
-
-        // Create filter coefficients
-        const h = new Float32Array(n);
-        for (let i = 0; i < n; i++) {
-            const x = i - n / 2;
-            if (x === 0) {
-                h[i] = 2 * (fc2 - fc1);
-            } else {
-                h[i] = (Math.sin(2 * Math.PI * fc2 * x) - Math.sin(2 * Math.PI * fc1 * x)) / (Math.PI * x);
-            }
-            // Hamming window
-            h[i] *= 0.54 - 0.46 * Math.cos(2 * Math.PI * i / n);
-        }
-
-        // Apply filter
-        for (let i = 0; i < samples.length; i++) {
-            let sum = 0;
-            for (let j = 0; j < n; j++) {
-                const idx = i - j + n / 2;
-                if (idx >= 0 && idx < samples.length) {
-                    sum += samples[idx] * h[j];
-                }
-            }
-            filtered[i] = sum;
-        }
-
-        return filtered;
-    }
-
-    function hilbertTransform(samples) {
-        // Approximate Hilbert transform using 90-degree phase shift
-        const real = new Float32Array(samples.length);
-        const imag = new Float32Array(samples.length);
-
-        // Simple 90-degree phase shift filter (differentiator-like)
-        const n = 31;
-        const h = new Float32Array(n);
-        for (let i = 0; i < n; i++) {
-            const x = i - (n - 1) / 2;
-            if (x === 0) {
-                h[i] = 0;
-            } else {
-                h[i] = 2 / (Math.PI * x) * Math.pow(Math.sin(Math.PI * x / 2), 2);
-            }
-        }
-
-        for (let i = 0; i < samples.length; i++) {
-            real[i] = samples[i];
-            let sum = 0;
-            for (let j = 0; j < n; j++) {
-                const idx = i - j + (n - 1) / 2;
-                if (idx >= 0 && idx < samples.length) {
-                    sum += samples[idx] * h[j];
-                }
-            }
-            imag[i] = sum;
-        }
-
-        return { real, imag };
-    }
-
-    function smoothArray(arr, windowSize) {
-        const result = new Float32Array(arr.length);
-        const halfWindow = Math.floor(windowSize / 2);
-
-        for (let i = 0; i < arr.length; i++) {
-            let sum = 0, count = 0;
-            for (let j = -halfWindow; j <= halfWindow; j++) {
-                const idx = i + j;
-                if (idx >= 0 && idx < arr.length) {
-                    sum += arr[idx];
-                    count++;
-                }
-            }
-            result[i] = sum / count;
-        }
-
-        return result;
-    }
-
-    function findSyncPulses(freqs) {
-        const pulses = [];
-        const minSyncSamples = Math.floor(0.005 * SAMPLE_RATE);
-        const maxSyncSamples = Math.floor(0.015 * SAMPLE_RATE);
-
-        let inSync = false;
-        let syncStart = 0;
-
-        for (let i = 0; i < freqs.length; i++) {
-            const isSync = freqs[i] < 1400 && freqs[i] > 1000;
-
-            if (isSync && !inSync) {
-                inSync = true;
-                syncStart = i;
-            } else if (!isSync && inSync) {
-                inSync = false;
-                const duration = i - syncStart;
-                if (duration >= minSyncSamples && duration <= maxSyncSamples) {
-                    pulses.push(syncStart);
-                }
-            }
-        }
-
-        // Filter pulses by expected interval
-        if (pulses.length < 2) return pulses;
-
-        const expectedInterval = Math.floor((SYNC_DURATION + SYNC_PORCH_DURATION + Y_SCAN_DURATION +
-            SEPARATOR_DURATION + COLOR_PORCH_DURATION + COLOR_SCAN_DURATION) * SAMPLE_RATE);
-        const tolerance = Math.floor(0.01 * SAMPLE_RATE);
-
-        const filtered = [pulses[0]];
-        for (let i = 1; i < pulses.length; i++) {
-            const dist = pulses[i] - filtered[filtered.length - 1];
-            if (Math.abs(dist - expectedInterval) < tolerance || dist > expectedInterval * 0.8) {
-                filtered.push(pulses[i]);
-            }
-        }
-
-        return filtered;
-    }
-
-    function freqToPixel(freq) {
-        const val = (freq - FREQ_BLACK) / (FREQ_WHITE - FREQ_BLACK) * 255;
-        return Math.max(0, Math.min(255, Math.round(val)));
-    }
-
-    // ============================================
-    // TX Functions
-    // ============================================
-    async function startTX() {
-        if (!imageData) return;
-
-        document.getElementById('tx-status').textContent = 'Encoding...';
-        document.getElementById('txBtn').disabled = true;
-
-        // Small delay to update UI
-        await new Promise(r => setTimeout(r, 50));
-
-        const audioData = encodeSSTV(imageData);
-
-        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
-
-        const buffer = audioCtx.createBuffer(1, audioData.length, SAMPLE_RATE);
-        buffer.getChannelData(0).set(audioData);
-
-        txSource = audioCtx.createBufferSource();
-        txSource.buffer = buffer;
-
-        const analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 2048;
-
-        txSource.connect(analyser);
-        analyser.connect(audioCtx.destination);
-
-        isTxPlaying = true;
-        document.getElementById('stopTxBtn').disabled = false;
-        document.getElementById('tx-status').textContent = 'Transmitting...';
-
-        const duration = audioData.length / SAMPLE_RATE;
-        const startTime = audioCtx.currentTime;
-
-        function updateTX() {
-            if (!isTxPlaying) return;
-
-            // Waveform
-            const canvas = document.getElementById('tx-waveform');
+        function drawWaveform(canvasId, analyser) {
+            const canvas = document.getElementById(canvasId);
             const ctx = canvas.getContext('2d');
             canvas.width = canvas.offsetWidth * 2;
             canvas.height = canvas.offsetHeight * 2;
-            ctx.scale(2, 2);
 
             const data = new Uint8Array(analyser.frequencyBinCount);
             analyser.getByteTimeDomainData(data);
 
-            ctx.fillStyle = 'rgba(0,0,0,0.3)';
-            ctx.fillRect(0, 0, canvas.offsetWidth, canvas.offsetHeight);
-
-            ctx.strokeStyle = '#ff6b6b';
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.strokeStyle = '#4ecdc4';
             ctx.lineWidth = 2;
             ctx.beginPath();
 
-            const sliceWidth = canvas.offsetWidth / data.length;
             for (let i = 0; i < data.length; i++) {
-                const y = (data[i] / 128) * canvas.offsetHeight / 2;
-                i === 0 ? ctx.moveTo(0, y) : ctx.lineTo(i * sliceWidth, y);
+                const x = i / data.length * canvas.width;
+                const y = data[i] / 255 * canvas.height;
+                i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
             }
             ctx.stroke();
-
-            // Progress
-            const elapsed = audioCtx.currentTime - startTime;
-            const progress = Math.min(100, (elapsed / duration) * 100);
-            document.getElementById('tx-progress').style.width = progress + '%';
-
-            requestAnimationFrame(updateTX);
         }
-
-        txSource.onended = () => {
-            isTxPlaying = false;
-            document.getElementById('tx-status').textContent = 'Complete!';
-            document.getElementById('txBtn').disabled = false;
-            document.getElementById('stopTxBtn').disabled = true;
-            document.getElementById('tx-progress').style.width = '100%';
-        };
-
-        txSource.start();
-        updateTX();
-    }
-
-    function stopTX() {
-        if (txSource) {
-            txSource.stop();
-            txSource = null;
-        }
-        isTxPlaying = false;
-        document.getElementById('tx-status').textContent = 'Stopped';
-        document.getElementById('txBtn').disabled = false;
-        document.getElementById('stopTxBtn').disabled = true;
-    }
-
-    // ============================================
-    // RX Functions
-    // ============================================
-    async function startRX() {
-        try {
-            rxStream = await navigator.mediaDevices.getUserMedia({
-                audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
-            });
-
-            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
-
-            const source = audioCtx.createMediaStreamSource(rxStream);
-            rxAnalyser = audioCtx.createAnalyser();
-            rxAnalyser.fftSize = 4096;
-
-            rxProcessor = audioCtx.createScriptProcessor(4096, 1, 1);
-
-            source.connect(rxAnalyser);
-            rxAnalyser.connect(rxProcessor);
-            rxProcessor.connect(audioCtx.destination);
-
-            rxBuffer = [];
-            isRxRecording = true;
-
-            rxProcessor.onaudioprocess = (e) => {
-                if (!isRxRecording) return;
-                rxBuffer.push(new Float32Array(e.inputBuffer.getChannelData(0)));
-                const totalSamples = rxBuffer.reduce((s, a) => s + a.length, 0);
-                document.getElementById('rx-info').textContent = `Recording: ${(totalSamples / SAMPLE_RATE).toFixed(1)}s`;
-            };
-
-            document.getElementById('rxBtn').disabled = true;
-            document.getElementById('rxBtn').classList.add('recording');
-            document.getElementById('stopRxBtn').disabled = false;
-            document.getElementById('rx-status').textContent = 'Listening...';
-
-            updateRX();
-
-        } catch (err) {
-            alert('Microphone error: ' + err.message);
-        }
-    }
-
-    function updateRX() {
-        if (!isRxRecording || !rxAnalyser) return;
-
-        // Waveform
-        const waveCanvas = document.getElementById('rx-waveform');
-        const waveCtx = waveCanvas.getContext('2d');
-        waveCanvas.width = waveCanvas.offsetWidth * 2;
-        waveCanvas.height = waveCanvas.offsetHeight * 2;
-        waveCtx.scale(2, 2);
-
-        const timeData = new Uint8Array(rxAnalyser.frequencyBinCount);
-        rxAnalyser.getByteTimeDomainData(timeData);
-
-        waveCtx.fillStyle = 'rgba(0,0,0,0.3)';
-        waveCtx.fillRect(0, 0, waveCanvas.offsetWidth, waveCanvas.offsetHeight);
-
-        waveCtx.strokeStyle = '#4ecdc4';
-        waveCtx.lineWidth = 2;
-        waveCtx.beginPath();
-
-        for (let i = 0; i < timeData.length; i++) {
-            const y = (timeData[i] / 128) * waveCanvas.offsetHeight / 2;
-            i === 0 ? waveCtx.moveTo(0, y) : waveCtx.lineTo(i * waveCanvas.offsetWidth / timeData.length, y);
-        }
-        waveCtx.stroke();
-
-        // Frequency display
-        const freqData = new Uint8Array(rxAnalyser.frequencyBinCount);
-        rxAnalyser.getByteFrequencyData(freqData);
-
-        const minBin = Math.floor(1000 * rxAnalyser.fftSize / SAMPLE_RATE);
-        const maxBin = Math.floor(2500 * rxAnalyser.fftSize / SAMPLE_RATE);
-
-        let maxVal = 0, maxIdx = minBin;
-        for (let i = minBin; i < maxBin; i++) {
-            if (freqData[i] > maxVal) { maxVal = freqData[i]; maxIdx = i; }
-        }
-
-        const peakFreq = Math.round(maxIdx * SAMPLE_RATE / rxAnalyser.fftSize);
-        document.getElementById('freq-display').textContent = peakFreq + ' Hz';
-
-        // Spectrogram
-        const specCanvas = document.getElementById('spectrogram');
-        const specCtx = specCanvas.getContext('2d');
-
-        if (specCanvas.width !== specCanvas.offsetWidth) {
-            specCanvas.width = specCanvas.offsetWidth;
-            specCanvas.height = specCanvas.offsetHeight;
-        }
-
-        const imgData = specCtx.getImageData(1, 0, specCanvas.width - 1, specCanvas.height);
-        specCtx.putImageData(imgData, 0, 0);
-
-        for (let i = 0; i < specCanvas.height; i++) {
-            const freqIdx = Math.floor((1 - i / specCanvas.height) * (maxBin - minBin) + minBin);
-            const val = freqData[freqIdx];
-            const hue = 180 - val * 0.7;
-            specCtx.fillStyle = `hsl(${hue}, 80%, ${val / 5}%)`;
-            specCtx.fillRect(specCanvas.width - 1, i, 1, 1);
-        }
-
-        requestAnimationFrame(updateRX);
-    }
-
-    function stopRX() {
-        isRxRecording = false;
-        if (rxStream) {
-            rxStream.getTracks().forEach(t => t.stop());
-            rxStream = null;
-        }
-        if (rxProcessor) {
-            rxProcessor.disconnect();
-            rxProcessor = null;
-        }
-
-        document.getElementById('rxBtn').disabled = false;
-        document.getElementById('rxBtn').classList.remove('recording');
-        document.getElementById('stopRxBtn').disabled = true;
-        document.getElementById('decodeBtn').disabled = rxBuffer.length === 0 ? true : false;
-        document.getElementById('rx-status').textContent = 'Stopped - Ready to decode';
-    }
-
-    async function decodeAudio() {
-        if (rxBuffer.length === 0) return;
-
-        document.getElementById('rx-status').textContent = 'Decoding...';
-        document.getElementById('decodeBtn').disabled = true;
-
-        await new Promise(r => setTimeout(r, 50));
-
-        // Combine buffer
-        const totalLength = rxBuffer.reduce((s, a) => s + a.length, 0);
-        const combined = new Float32Array(totalLength);
-        let offset = 0;
-        for (const chunk of rxBuffer) {
-            combined.set(chunk, offset);
-            offset += chunk.length;
-        }
-
-        const imgData = decodeSSTV(combined);
-
-        if (imgData) {
-            const canvas = document.getElementById('rx-canvas');
-            const ctx = canvas.getContext('2d');
-            ctx.putImageData(imgData, 0, 0);
-            canvas.style.display = 'block';
-            document.getElementById('rx-placeholder').style.display = 'none';
-            document.getElementById('saveBtn').disabled = false;
-            document.getElementById('rx-status').textContent = 'Decoded!';
-        } else {
-            document.getElementById('rx-status').textContent = 'Decoding failed - try again';
-        }
-
-        document.getElementById('decodeBtn').disabled = false;
-    }
-
-    function saveImage() {
-        const canvas = document.getElementById('rx-canvas');
-        const link = document.createElement('a');
-        link.download = 'sstv_decoded_' + Date.now() + '.png';
-        link.href = canvas.toDataURL();
-        link.click();
-    }
     </script>
 </body>
 </html>
