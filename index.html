@@ -1199,7 +1199,8 @@ function decodeSSTV(audio, onProgress, onLine) {
         const colorStart = yEnd + sepSamples + colorPorchSamples;
         const colorEnd = colorStart + colorSamples;
         const isEven = linesDecoded % 2 === 0;
-        const colorImg = isEven ? liveCbImage : liveCrImage;
+        // Even lines have Cr, odd lines have Cb (matching encoder)
+        const colorImg = isEven ? liveCrImage : liveCbImage;
 
         for (let x = 0; x < WIDTH; x++) {
             const idx = colorStart + Math.floor(x / WIDTH * (colorEnd - colorStart));
@@ -1208,10 +1209,13 @@ function decodeSSTV(audio, onProgress, onLine) {
             }
         }
 
+        // Copy the other channel from previous line
         if (isEven && linesDecoded > 0) {
-            liveCrImage[linesDecoded] = liveCrImage[linesDecoded - 1].slice();
-        } else if (!isEven && linesDecoded > 0) {
+            // Even line has Cr, copy Cb from previous
             liveCbImage[linesDecoded] = liveCbImage[linesDecoded - 1].slice();
+        } else if (!isEven && linesDecoded > 0) {
+            // Odd line has Cb, copy Cr from previous
+            liveCrImage[linesDecoded] = liveCrImage[linesDecoded - 1].slice();
         }
 
         linesDecoded++;
@@ -1233,15 +1237,19 @@ function decodeSSTV(audio, onProgress, onLine) {
 
     onProgress?.('Interpolating colors...', 92);
 
+    // Even lines have Cr, need to interpolate Cb
+    // Odd lines have Cb, need to interpolate Cr
     for (let i = 1; i < linesDecoded - 1; i++) {
         const isEven = i % 2 === 0;
         if (isEven) {
-            for (let x = 0; x < WIDTH; x++) {
-                liveCrImage[i][x] = Math.floor((liveCrImage[i - 1][x] + liveCrImage[i + 1][x]) / 2);
-            }
-        } else {
+            // Even line has Cr, interpolate Cb from adjacent odd lines
             for (let x = 0; x < WIDTH; x++) {
                 liveCbImage[i][x] = Math.floor((liveCbImage[i - 1][x] + liveCbImage[i + 1][x]) / 2);
+            }
+        } else {
+            // Odd line has Cb, interpolate Cr from adjacent even lines
+            for (let x = 0; x < WIDTH; x++) {
+                liveCrImage[i][x] = Math.floor((liveCrImage[i - 1][x] + liveCrImage[i + 1][x]) / 2);
             }
         }
     }
