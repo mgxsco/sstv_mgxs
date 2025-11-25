@@ -5,9 +5,10 @@ SSTV Robot36 Web Server
 Live TX (sender) and RX (receiver) web interface for SSTV Robot36.
 """
 
+import argparse
 import base64
 import io
-import json
+import socket
 import numpy as np
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit
@@ -236,8 +237,38 @@ def handle_broadcast_audio(data):
     emit('sstv_signal', data, broadcast=True, include_self=False)
 
 
+def get_local_ip():
+    """Get the local network IP address"""
+    try:
+        # Connect to an external address to determine local IP
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+        return local_ip
+    except Exception:
+        return "127.0.0.1"
+
+
 if __name__ == '__main__':
-    print("Starting SSTV Robot36 Web Server...")
-    print("  Sender:   http://localhost:5000/sender")
-    print("  Receiver: http://localhost:5000/receiver")
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+    parser = argparse.ArgumentParser(description='SSTV Robot36 Web Server')
+    parser.add_argument('-p', '--port', type=int, default=5000,
+                        help='Port to run the server on (default: 5000)')
+    parser.add_argument('--host', type=str, default='0.0.0.0',
+                        help='Host to bind to (default: 0.0.0.0)')
+    parser.add_argument('--debug', action='store_true',
+                        help='Enable debug mode')
+    args = parser.parse_args()
+
+    local_ip = get_local_ip()
+
+    print("\n" + "=" * 50)
+    print("  SSTV Robot36 Web Server")
+    print("=" * 50)
+    print(f"\n  Local:    http://localhost:{args.port}")
+    print(f"  Network:  http://{local_ip}:{args.port}")
+    print(f"\n  TX Page:  http://{local_ip}:{args.port}/sender")
+    print(f"  RX Page:  http://{local_ip}:{args.port}/receiver")
+    print("\n" + "=" * 50 + "\n")
+
+    socketio.run(app, host=args.host, port=args.port, debug=args.debug)
