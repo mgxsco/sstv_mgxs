@@ -156,7 +156,7 @@
                         <span>Phase (horizontal shift)</span>
                         <span class="value" id="phase-value">0</span>
                     </div>
-                    <input type="range" id="phase-slider" min="-2000" max="2000" value="0" oninput="adjustImage()">
+                    <input type="range" id="phase-slider" min="-10000" max="10000" value="0" oninput="adjustImage()">
                 </div>
                 <div class="slider-group">
                     <div class="slider-label">
@@ -737,7 +737,7 @@ function autoAlign() {
     let bestPhase = 0;
     let bestScore = 0;
 
-    for (let phase = -1000; phase <= 1000; phase += 50) {
+    for (let phase = -5000; phase <= 5000; phase += 100) {
         let score = 0;
         for (let line = 0; line < Math.min(20, HEIGHT); line++) {
             const lineStart = decodedImageStart + phase + line * lineSamples;
