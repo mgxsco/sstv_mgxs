@@ -52,39 +52,6 @@
         .mode-btn.active { background: #4ecdc4; }
         .mode-btn:not(.active) { background: rgba(255,255,255,0.1); }
 
-        /* Adjustment controls */
-        .adjust-panel { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.1); }
-        .adjust-panel h3 { font-size: 0.8rem; color: #8892b0; margin-bottom: 0.75rem; text-transform: uppercase; }
-        .slider-group { margin-bottom: 0.75rem; }
-        .slider-label { display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 0.25rem; }
-        .slider-label span { color: #8892b0; }
-        .slider-label .value { color: #4ecdc4; font-family: monospace; }
-        input[type="range"] {
-            width: 100%;
-            height: 6px;
-            -webkit-appearance: none;
-            background: rgba(255,255,255,0.1);
-            border-radius: 3px;
-            outline: none;
-        }
-        input[type="range"]::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            width: 16px;
-            height: 16px;
-            background: #4ecdc4;
-            border-radius: 50%;
-            cursor: pointer;
-        }
-        input[type="range"]::-moz-range-thumb {
-            width: 16px;
-            height: 16px;
-            background: #4ecdc4;
-            border-radius: 50%;
-            cursor: pointer;
-            border: none;
-        }
-        .adjust-buttons { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
-        .adjust-buttons button { padding: 0.5rem 1rem; font-size: 0.85rem; }
     </style>
 </head>
 <body>
@@ -148,36 +115,6 @@
                 <button id="rx-clear" onclick="clearRx()" class="secondary">Clear</button>
             </div>
 
-            <!-- Phase and Skew Adjustment -->
-            <div class="adjust-panel" id="adjust-panel" style="display:none;">
-                <h3>Image Alignment</h3>
-                <div class="slider-group">
-                    <div class="slider-label">
-                        <span>Phase (horizontal shift)</span>
-                        <span class="value" id="phase-value">0</span>
-                    </div>
-                    <input type="range" id="phase-slider" min="-10000" max="10000" value="0" oninput="adjustImage()">
-                </div>
-                <div class="slider-group">
-                    <div class="slider-label">
-                        <span>Skew (timing drift)</span>
-                        <span class="value" id="skew-value">0.000</span>
-                    </div>
-                    <input type="range" id="skew-slider" min="-100" max="100" value="0" step="1" oninput="adjustImage()">
-                </div>
-                <div class="slider-group">
-                    <div class="slider-label">
-                        <span>Line Start Offset</span>
-                        <span class="value" id="offset-value">0</span>
-                    </div>
-                    <input type="range" id="offset-slider" min="-500" max="500" value="0" oninput="adjustImage()">
-                </div>
-                <div class="adjust-buttons">
-                    <button onclick="resetAdjustments()" class="secondary">Reset</button>
-                    <button onclick="autoAlign()">Auto Align</button>
-                    <button onclick="applyAndSave()">Apply & Save</button>
-                </div>
-            </div>
         </div>
     </div>
 
@@ -213,11 +150,6 @@ const COLOR_SCAN_DURATION = 0.044;
 const LINE_DURATION = SYNC_DURATION + SYNC_PORCH_DURATION + Y_SCAN_DURATION +
                       SEPARATOR_DURATION + COLOR_PORCH_DURATION + COLOR_SCAN_DURATION;
 const TOTAL_DURATION = LINE_DURATION * HEIGHT + 0.7;
-
-// Store decoded frequency data for re-rendering with adjustments
-let decodedFreqs = null;
-let decodedImageStart = 0;
-let decodedLinesCount = 0;
 
 // ============================================
 // Color Conversion
@@ -419,7 +351,6 @@ function initStreamDecoder() {
     streamLeaderCount = 0;
     streamImageStartIdx = 0;
     streamLastProcessed = 0;
-    hasRealtimeImage = false;
     initLiveBuffers();
 }
 
@@ -619,8 +550,6 @@ function processStreamChunk(chunk) {
 
         document.getElementById('rx-progress').style.width = (streamLineNum / HEIGHT * 100) + '%';
         document.getElementById('rx-status').textContent = `Decoding line ${streamLineNum}/${HEIGHT}...`;
-
-        hasRealtimeImage = true;
     }
 
     // Trim buffer to save memory
@@ -636,42 +565,14 @@ function processStreamChunk(chunk) {
 
     // Check if complete
     if (streamLineNum >= HEIGHT) {
-        decodedFreqs = null;
-        decodedLinesCount = streamLineNum;
-
         document.getElementById('rx-status').textContent = `Complete! Decoded ${streamLineNum} lines`;
         document.getElementById('rx-save').disabled = false;
 
         setTimeout(() => {
             if (isListening) {
-                finishStreamDecode();
+                stopListening();
             }
         }, 500);
-    }
-}
-
-function finishStreamDecode() {
-    stopListening();
-
-    if (rxChunks.length > 0) {
-        const totalLen = rxChunks.reduce((s, c) => s + c.length, 0);
-        const combined = new Float32Array(totalLen);
-        let offset = 0;
-        for (const chunk of rxChunks) {
-            combined.set(chunk, offset);
-            offset += chunk.length;
-        }
-
-        setTimeout(() => {
-            try {
-                decodedFreqs = demodulateFFM(combined, null);
-                decodedImageStart = detectSignalStart(decodedFreqs);
-                document.getElementById('adjust-panel').style.display = 'block';
-                resetAdjustments();
-            } catch (e) {
-                console.error('Post-decode adjustment prep failed:', e);
-            }
-        }, 100);
     }
 }
 
@@ -915,234 +816,9 @@ function detectSignalStart(freqs) {
     return 0;
 }
 
-// Render image with phase/skew adjustments
-function renderWithAdjustments(phaseOffset, skewFactor, lineOffset) {
-    if (!decodedFreqs) return;
-
-    const freqs = decodedFreqs;
-    const baseLineSamples = Math.floor(LINE_DURATION * SAMPLE_RATE);
-    const syncSamples = Math.floor(SYNC_DURATION * SAMPLE_RATE);
-    const porchSamples = Math.floor(SYNC_PORCH_DURATION * SAMPLE_RATE);
-    const ySamples = Math.floor(Y_SCAN_DURATION * SAMPLE_RATE);
-    const sepSamples = Math.floor(SEPARATOR_DURATION * SAMPLE_RATE);
-    const colorPorchSamples = Math.floor(COLOR_PORCH_DURATION * SAMPLE_RATE);
-    const colorSamples = Math.floor(COLOR_SCAN_DURATION * SAMPLE_RATE);
-
-    // Re-init buffers
-    liveYImage = new Array(HEIGHT).fill(null).map(() => new Uint8Array(WIDTH).fill(128));
-    liveCrImage = new Array(HEIGHT).fill(null).map(() => new Uint8Array(WIDTH).fill(128));
-    liveCbImage = new Array(HEIGHT).fill(null).map(() => new Uint8Array(WIDTH).fill(128));
-
-    // First pass: decode all lines and detect which color channel each has
-    const lineColors = []; // true = Cr (even/black sep), false = Cb (odd/white sep)
-
-    for (let line = 0; line < HEIGHT; line++) {
-        const lineSamples = baseLineSamples + skewFactor;
-        const lineStart = decodedImageStart + phaseOffset + lineOffset + Math.floor(line * lineSamples);
-
-        if (lineStart < 0 || lineStart + baseLineSamples > freqs.length) {
-            lineColors.push(line % 2 === 0); // fallback
-            continue;
-        }
-
-        // Extract Y data
-        const yStart = lineStart + syncSamples + porchSamples;
-        const yEnd = yStart + ySamples;
-
-        for (let x = 0; x < WIDTH; x++) {
-            const idx = yStart + Math.floor(x / WIDTH * (yEnd - yStart));
-            if (idx >= 0 && idx < freqs.length) {
-                liveYImage[line][x] = freqToValue(freqs[idx]);
-            }
-        }
-
-        // Detect separator tone to determine color channel
-        // Even lines (Cr): separator is ~1500Hz (black)
-        // Odd lines (Cb): separator is ~2300Hz (white)
-        const sepStart = yEnd;
-        let sepFreqSum = 0;
-        let sepCount = 0;
-        for (let s = 0; s < sepSamples && sepStart + s < freqs.length; s++) {
-            sepFreqSum += freqs[sepStart + s];
-            sepCount++;
-        }
-        const avgSepFreq = sepCount > 0 ? sepFreqSum / sepCount : 1900;
-
-        // If separator freq < 1700Hz, it's a Cr line (black separator)
-        // If separator freq > 1700Hz, it's a Cb line (white separator)
-        const isCrLine = avgSepFreq < 1700;
-        lineColors.push(isCrLine);
-
-        // Extract color data
-        const colorStart = yEnd + sepSamples + colorPorchSamples;
-        const colorEnd = colorStart + colorSamples;
-
-        // Store to correct color buffer based on detected separator
-        const colorImg = isCrLine ? liveCrImage : liveCbImage;
-
-        for (let x = 0; x < WIDTH; x++) {
-            const idx = colorStart + Math.floor(x / WIDTH * (colorEnd - colorStart));
-            if (idx >= 0 && idx < freqs.length) {
-                colorImg[line][x] = freqToValue(freqs[idx]);
-            }
-        }
-    }
-
-    // Second pass: interpolate missing color channels
-    for (let line = 0; line < HEIGHT; line++) {
-        const isCrLine = lineColors[line];
-
-        if (isCrLine) {
-            // This line has Cr, need to interpolate Cb
-            // Find nearest lines with Cb
-            let prevCb = -1, nextCb = -1;
-            for (let i = line - 1; i >= 0; i--) {
-                if (!lineColors[i]) { prevCb = i; break; }
-            }
-            for (let i = line + 1; i < HEIGHT; i++) {
-                if (!lineColors[i]) { nextCb = i; break; }
-            }
-
-            if (prevCb >= 0 && nextCb >= 0) {
-                // Interpolate between prev and next
-                const t = (line - prevCb) / (nextCb - prevCb);
-                for (let x = 0; x < WIDTH; x++) {
-                    liveCbImage[line][x] = Math.floor(liveCbImage[prevCb][x] * (1 - t) + liveCbImage[nextCb][x] * t);
-                }
-            } else if (prevCb >= 0) {
-                liveCbImage[line] = liveCbImage[prevCb].slice();
-            } else if (nextCb >= 0) {
-                liveCbImage[line] = liveCbImage[nextCb].slice();
-            }
-        } else {
-            // This line has Cb, need to interpolate Cr
-            let prevCr = -1, nextCr = -1;
-            for (let i = line - 1; i >= 0; i--) {
-                if (lineColors[i]) { prevCr = i; break; }
-            }
-            for (let i = line + 1; i < HEIGHT; i++) {
-                if (lineColors[i]) { nextCr = i; break; }
-            }
-
-            if (prevCr >= 0 && nextCr >= 0) {
-                const t = (line - prevCr) / (nextCr - prevCr);
-                for (let x = 0; x < WIDTH; x++) {
-                    liveCrImage[line][x] = Math.floor(liveCrImage[prevCr][x] * (1 - t) + liveCrImage[nextCr][x] * t);
-                }
-            } else if (prevCr >= 0) {
-                liveCrImage[line] = liveCrImage[prevCr].slice();
-            } else if (nextCr >= 0) {
-                liveCrImage[line] = liveCrImage[nextCr].slice();
-            }
-        }
-    }
-
-    renderFullImage();
-}
-
-function adjustImage() {
-    const phase = parseInt(document.getElementById('phase-slider').value);
-    const skew = parseFloat(document.getElementById('skew-slider').value);
-    const offset = parseInt(document.getElementById('offset-slider').value);
-
-    document.getElementById('phase-value').textContent = phase;
-    document.getElementById('skew-value').textContent = skew.toFixed(1);
-    document.getElementById('offset-value').textContent = offset;
-
-    // User is adjusting - clear the real-time image flag
-    hasRealtimeImage = false;
-
-    renderWithAdjustments(phase, skew, offset);
-}
-
-// Track if we have a good real-time decoded image (don't overwrite with re-render at 0,0,0)
-let hasRealtimeImage = false;
-
-function resetAdjustments() {
-    document.getElementById('phase-slider').value = 0;
-    document.getElementById('skew-slider').value = 0;
-    document.getElementById('offset-slider').value = 0;
-    document.getElementById('phase-value').textContent = '0';
-    document.getElementById('skew-value').textContent = '0.0';
-    document.getElementById('offset-value').textContent = '0';
-
-    // Don't re-render if we have a good real-time decoded image at default values
-    if (!hasRealtimeImage) {
-        adjustImage();
-    }
-}
-
-function autoAlign() {
-    if (!decodedFreqs) return;
-
-    // Try to find sync pulses more precisely
-    const freqs = decodedFreqs;
-    const syncSamples = Math.floor(SYNC_DURATION * SAMPLE_RATE);
-    const lineSamples = Math.floor(LINE_DURATION * SAMPLE_RATE);
-
-    // Search around current start for best sync alignment
-    let bestPhase = 0;
-    let bestScore = 0;
-
-    for (let phase = -5000; phase <= 5000; phase += 100) {
-        let score = 0;
-        for (let line = 0; line < Math.min(20, HEIGHT); line++) {
-            const lineStart = decodedImageStart + phase + line * lineSamples;
-            if (lineStart < 0 || lineStart + syncSamples > freqs.length) continue;
-
-            // Count sync-frequency samples at expected position
-            for (let s = 0; s < syncSamples; s++) {
-                if (freqs[lineStart + s] < 1350 && freqs[lineStart + s] > 1100) {
-                    score++;
-                }
-            }
-        }
-        if (score > bestScore) {
-            bestScore = score;
-            bestPhase = phase;
-        }
-    }
-
-    // Try to detect skew by comparing first and last line sync positions
-    let bestSkew = 0;
-    bestScore = 0;
-
-    for (let skew = -50; skew <= 50; skew += 2) {
-        let score = 0;
-        const adjustedLineSamples = lineSamples + skew;
-
-        for (let line = 0; line < HEIGHT; line += 20) {
-            const lineStart = decodedImageStart + bestPhase + Math.floor(line * adjustedLineSamples);
-            if (lineStart < 0 || lineStart + syncSamples > freqs.length) continue;
-
-            for (let s = 0; s < syncSamples; s++) {
-                if (freqs[lineStart + s] < 1350 && freqs[lineStart + s] > 1100) {
-                    score++;
-                }
-            }
-        }
-        if (score > bestScore) {
-            bestScore = score;
-            bestSkew = skew;
-        }
-    }
-
-    document.getElementById('phase-slider').value = bestPhase;
-    document.getElementById('skew-slider').value = bestSkew;
-    document.getElementById('offset-slider').value = 0;
-    adjustImage();
-}
-
-function applyAndSave() {
-    saveImage();
-}
-
 function decodeSSTV(audio, onProgress, onLine) {
     console.log('Decoding', audio.length, 'samples...');
     onProgress?.('Starting decode...', 0);
-
-    // Not using real-time decode for audio file
-    hasRealtimeImage = false;
 
     // Normalize audio
     let maxAmp = 0;
@@ -1160,12 +836,8 @@ function decodeSSTV(audio, onProgress, onLine) {
     // FM demodulation
     const freqs = demodulateFFM(audio, onProgress);
 
-    // Store for adjustments
-    decodedFreqs = freqs;
-
     onProgress?.('Finding signal start...', 10);
     const imageStart = detectSignalStart(freqs);
-    decodedImageStart = imageStart;
     console.log('Image starts at sample', imageStart);
 
     onProgress?.('Finding sync pulses...', 20);
@@ -1263,10 +935,6 @@ function decodeSSTV(audio, onProgress, onLine) {
 
     onProgress?.('Rendering final image...', 98);
     renderFullImage();
-
-    // Show adjustment panel
-    document.getElementById('adjust-panel').style.display = 'block';
-    resetAdjustments();
 
     onProgress?.('Done!', 100);
     return linesDecoded;
@@ -1496,31 +1164,6 @@ function stopAndDecode() {
     if (streamLineNum > 0) {
         document.getElementById('rx-status').textContent = `Decoded ${streamLineNum}/${HEIGHT} lines`;
         document.getElementById('rx-save').disabled = false;
-
-        // Prepare adjustment controls with full decode
-        if (rxChunks.length > 0) {
-            const totalLen = rxChunks.reduce((s, c) => s + c.length, 0);
-            const combined = new Float32Array(totalLen);
-            let offset = 0;
-            for (const chunk of rxChunks) {
-                combined.set(chunk, offset);
-                offset += chunk.length;
-            }
-
-            setTimeout(() => {
-                try {
-                    document.getElementById('rx-status').textContent = 'Preparing adjustment controls...';
-                    decodedFreqs = demodulateFFM(combined, null);
-                    decodedImageStart = detectSignalStart(decodedFreqs);
-                    document.getElementById('adjust-panel').style.display = 'block';
-                    resetAdjustments();
-                    document.getElementById('rx-status').textContent = `Decoded ${streamLineNum}/${HEIGHT} lines - adjust alignment below`;
-                } catch (e) {
-                    console.error('Adjustment prep failed:', e);
-                    document.getElementById('rx-status').textContent = `Decoded ${streamLineNum}/${HEIGHT} lines`;
-                }
-            }, 100);
-        }
         return;
     }
 
@@ -1721,8 +1364,6 @@ document.getElementById('audio-file').onchange = async e => {
 function clearRx() {
     rxChunks = [];
     liveLineCount = 0;
-    decodedFreqs = null;
-    decodedImageStart = 0;
 
     // Reset streaming decoder state
     streamBuffer = new Float32Array(0);
@@ -1732,7 +1373,6 @@ function clearRx() {
     streamLeaderCount = 0;
     streamImageStartIdx = 0;
     streamLastProcessed = 0;
-    hasRealtimeImage = false;
 
     const canvas = document.getElementById('rx-canvas');
     const ctx = canvas.getContext('2d');
@@ -1742,7 +1382,6 @@ function clearRx() {
 
     document.getElementById('rx-placeholder').style.display = 'block';
     document.getElementById('line-indicator').style.display = 'none';
-    document.getElementById('adjust-panel').style.display = 'none';
     document.getElementById('rx-save').disabled = true;
     document.getElementById('rx-progress').style.width = '0%';
     document.getElementById('rx-status').textContent = 'Cleared';
