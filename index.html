@@ -397,8 +397,8 @@
             addTone(isEven ? FREQ_BLACK : FREQ_WHITE, SEPARATOR_DURATION);
             addTone(FREQ_BLACK, COLOR_PORCH_DURATION);
 
-            // Color scan (Cr for even, Cb for odd)
-            addScanLine(isEven ? ycrcb[line].cr : ycrcb[line].cb, COLOR_SCAN_DURATION);
+            // Color scan (Cb for even, Cr for odd) - swapped to match decoder
+            addScanLine(isEven ? ycrcb[line].cb : ycrcb[line].cr, COLOR_SCAN_DURATION);
         }
 
         return new Float32Array(samples);
@@ -408,32 +408,17 @@
     // SSTV Decoder
     // ============================================
     function decodeSSTV(audioData) {
-        // FM demodulation using zero-crossing
-        const freqs = new Float32Array(audioData.length);
+        console.log('Decoding', audioData.length, 'samples');
 
-        // Simple frequency estimation
-        for (let i = 1; i < audioData.length; i++) {
-            // Instantaneous frequency from phase difference
-            const diff = audioData[i] - audioData[i - 1];
-            // Estimate frequency based on slope (simplified)
-            freqs[i] = 1900; // Default
-        }
-
-        // Better approach: use Goertzel or FFT on small windows
-        const windowSize = Math.floor(SAMPLE_RATE * 0.001); // 1ms windows
-        for (let i = 0; i < audioData.length - windowSize; i += windowSize / 2) {
-            const window = audioData.slice(i, i + windowSize);
-            const freq = estimateFrequency(window);
-            for (let j = 0; j < windowSize / 2 && i + j < freqs.length; j++) {
-                freqs[i + j] = freq;
-            }
-        }
+        // FM demodulation using phase derivative
+        const freqs = fmDemodulate(audioData);
 
         // Find sync pulses
         const syncPulses = findSyncPulses(freqs);
+        console.log('Found', syncPulses.length, 'sync pulses');
 
         if (syncPulses.length < 10) {
-            console.log('Not enough sync pulses found:', syncPulses.length);
+            console.log('Not enough sync pulses found');
             return null;
         }
 
@@ -455,22 +440,32 @@
             const colorStart = yEnd + Math.floor((SEPARATOR_DURATION + COLOR_PORCH_DURATION) * SAMPLE_RATE);
             const colorEnd = colorStart + Math.floor(COLOR_SCAN_DURATION * SAMPLE_RATE);
 
-            // Extract Y
+            // Extract Y - average over pixel width for better quality
+            const ySamplesPerPixel = (yEnd - yStart) / WIDTH;
             for (let x = 0; x < WIDTH; x++) {
-                const idx = yStart + Math.floor(x / WIDTH * (yEnd - yStart));
-                if (idx < freqs.length) {
-                    yImage[linesDecoded][x] = freqToPixel(freqs[idx]);
+                const startIdx = yStart + Math.floor(x * ySamplesPerPixel);
+                const endIdx = yStart + Math.floor((x + 1) * ySamplesPerPixel);
+                let sum = 0, count = 0;
+                for (let j = startIdx; j < endIdx && j < freqs.length; j++) {
+                    sum += freqs[j];
+                    count++;
                 }
+                yImage[linesDecoded][x] = freqToPixel(count > 0 ? sum / count : 1900);
             }
 
-            // Extract color
+            // Extract color - average over pixel width
             const isEven = linesDecoded % 2 === 0;
             const colorImg = isEven ? cbImage : crImage;
+            const colorSamplesPerPixel = (colorEnd - colorStart) / WIDTH;
             for (let x = 0; x < WIDTH; x++) {
-                const idx = colorStart + Math.floor(x / WIDTH * (colorEnd - colorStart));
-                if (idx < freqs.length) {
-                    colorImg[linesDecoded][x] = freqToPixel(freqs[idx]);
+                const startIdx = colorStart + Math.floor(x * colorSamplesPerPixel);
+                const endIdx = colorStart + Math.floor((x + 1) * colorSamplesPerPixel);
+                let sum = 0, count = 0;
+                for (let j = startIdx; j < endIdx && j < freqs.length; j++) {
+                    sum += freqs[j];
+                    count++;
                 }
+                colorImg[linesDecoded][x] = freqToPixel(count > 0 ? sum / count : 1900);
             }
 
             linesDecoded++;
@@ -507,27 +502,129 @@
         return imgData;
     }
 
-    function estimateFrequency(samples) {
-        // Zero-crossing rate estimation
-        let crossings = 0;
-        for (let i = 1; i < samples.length; i++) {
-            if ((samples[i] >= 0 && samples[i - 1] < 0) || (samples[i] < 0 && samples[i - 1] >= 0)) {
-                crossings++;
+    function fmDemodulate(samples) {
+        // Bandpass filter the signal first (1000-2500 Hz)
+        const filtered = bandpassFilter(samples, 1000, 2500);
+
+        // Compute analytic signal using Hilbert transform approximation
+        const analytic = hilbertTransform(filtered);
+
+        // Compute instantaneous frequency from phase derivative
+        const freqs = new Float32Array(samples.length);
+        let prevPhase = 0;
+
+        for (let i = 0; i < samples.length; i++) {
+            const phase = Math.atan2(analytic.imag[i], analytic.real[i]);
+            let phaseDiff = phase - prevPhase;
+
+            // Unwrap phase
+            while (phaseDiff > Math.PI) phaseDiff -= 2 * Math.PI;
+            while (phaseDiff < -Math.PI) phaseDiff += 2 * Math.PI;
+
+            freqs[i] = Math.abs(phaseDiff * SAMPLE_RATE / (2 * Math.PI));
+            prevPhase = phase;
+        }
+
+        // Smooth the frequency estimate
+        return smoothArray(freqs, 5);
+    }
+
+    function bandpassFilter(samples, lowFreq, highFreq) {
+        // Simple FIR bandpass filter
+        const filtered = new Float32Array(samples.length);
+        const fc1 = lowFreq / SAMPLE_RATE;
+        const fc2 = highFreq / SAMPLE_RATE;
+        const n = 64; // Filter order
+
+        // Create filter coefficients
+        const h = new Float32Array(n);
+        for (let i = 0; i < n; i++) {
+            const x = i - n / 2;
+            if (x === 0) {
+                h[i] = 2 * (fc2 - fc1);
+            } else {
+                h[i] = (Math.sin(2 * Math.PI * fc2 * x) - Math.sin(2 * Math.PI * fc1 * x)) / (Math.PI * x);
+            }
+            // Hamming window
+            h[i] *= 0.54 - 0.46 * Math.cos(2 * Math.PI * i / n);
+        }
+
+        // Apply filter
+        for (let i = 0; i < samples.length; i++) {
+            let sum = 0;
+            for (let j = 0; j < n; j++) {
+                const idx = i - j + n / 2;
+                if (idx >= 0 && idx < samples.length) {
+                    sum += samples[idx] * h[j];
+                }
+            }
+            filtered[i] = sum;
+        }
+
+        return filtered;
+    }
+
+    function hilbertTransform(samples) {
+        // Approximate Hilbert transform using 90-degree phase shift
+        const real = new Float32Array(samples.length);
+        const imag = new Float32Array(samples.length);
+
+        // Simple 90-degree phase shift filter (differentiator-like)
+        const n = 31;
+        const h = new Float32Array(n);
+        for (let i = 0; i < n; i++) {
+            const x = i - (n - 1) / 2;
+            if (x === 0) {
+                h[i] = 0;
+            } else {
+                h[i] = 2 / (Math.PI * x) * Math.pow(Math.sin(Math.PI * x / 2), 2);
             }
         }
-        return (crossings / 2) * SAMPLE_RATE / samples.length;
+
+        for (let i = 0; i < samples.length; i++) {
+            real[i] = samples[i];
+            let sum = 0;
+            for (let j = 0; j < n; j++) {
+                const idx = i - j + (n - 1) / 2;
+                if (idx >= 0 && idx < samples.length) {
+                    sum += samples[idx] * h[j];
+                }
+            }
+            imag[i] = sum;
+        }
+
+        return { real, imag };
+    }
+
+    function smoothArray(arr, windowSize) {
+        const result = new Float32Array(arr.length);
+        const halfWindow = Math.floor(windowSize / 2);
+
+        for (let i = 0; i < arr.length; i++) {
+            let sum = 0, count = 0;
+            for (let j = -halfWindow; j <= halfWindow; j++) {
+                const idx = i + j;
+                if (idx >= 0 && idx < arr.length) {
+                    sum += arr[idx];
+                    count++;
+                }
+            }
+            result[i] = sum / count;
+        }
+
+        return result;
     }
 
     function findSyncPulses(freqs) {
         const pulses = [];
-        const minSyncSamples = Math.floor(0.006 * SAMPLE_RATE);
+        const minSyncSamples = Math.floor(0.005 * SAMPLE_RATE);
         const maxSyncSamples = Math.floor(0.015 * SAMPLE_RATE);
 
         let inSync = false;
         let syncStart = 0;
 
         for (let i = 0; i < freqs.length; i++) {
-            const isSync = freqs[i] < 1350;
+            const isSync = freqs[i] < 1400 && freqs[i] > 1000;
 
             if (isSync && !inSync) {
                 inSync = true;
