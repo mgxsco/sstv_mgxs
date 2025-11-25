@@ -446,7 +446,6 @@ function demodulateRealtime(signal, startIdx, endIdx) {
             const period = i - lastZeroCross;
             if (period > 0) {
                 currentFreq = SAMPLE_RATE / period;
-                // Clamp to valid SSTV range
                 currentFreq = Math.max(1000, Math.min(2500, currentFreq));
             }
             lastZeroCross = i;
@@ -472,22 +471,99 @@ function demodulateRealtime(signal, startIdx, endIdx) {
     return smoothed;
 }
 
+// Unified line decoder - extracts Y and color from frequency data
+// Returns: { y: Uint8Array, color: Uint8Array, isCrLine: boolean }
+function decodeSingleLine(freqs, lineOffset) {
+    const syncSamples = Math.floor(SYNC_DURATION * SAMPLE_RATE);
+    const porchSamples = Math.floor(SYNC_PORCH_DURATION * SAMPLE_RATE);
+    const ySamples = Math.floor(Y_SCAN_DURATION * SAMPLE_RATE);
+    const sepSamples = Math.floor(SEPARATOR_DURATION * SAMPLE_RATE);
+    const colorPorchSamples = Math.floor(COLOR_PORCH_DURATION * SAMPLE_RATE);
+    const colorSamples = Math.floor(COLOR_SCAN_DURATION * SAMPLE_RATE);
+
+    const yData = new Uint8Array(WIDTH);
+    const colorData = new Uint8Array(WIDTH);
+
+    // Extract Y (luminance) data
+    const yStart = lineOffset + syncSamples + porchSamples;
+    const yEnd = yStart + ySamples;
+
+    for (let x = 0; x < WIDTH; x++) {
+        const idx = yStart + Math.floor(x / WIDTH * (yEnd - yStart));
+        if (idx >= 0 && idx < freqs.length) {
+            yData[x] = freqToValue(freqs[idx]);
+        } else {
+            yData[x] = 128;
+        }
+    }
+
+    // Detect separator tone to determine Cr or Cb line
+    // Robot36: Even lines have BLACK separator (1500Hz) = Cr
+    //          Odd lines have WHITE separator (2300Hz) = Cb
+    const sepStart = yEnd;
+    let sepFreqSum = 0;
+    let sepCount = 0;
+    for (let s = 0; s < sepSamples; s++) {
+        const idx = sepStart + s;
+        if (idx >= 0 && idx < freqs.length) {
+            sepFreqSum += freqs[idx];
+            sepCount++;
+        }
+    }
+    const avgSepFreq = sepCount > 0 ? sepFreqSum / sepCount : 1900;
+
+    // Black separator (~1500Hz) = Cr line, White separator (~2300Hz) = Cb line
+    const isCrLine = avgSepFreq < 1900;
+
+    // Extract color (Cr or Cb) data
+    const colorStart = sepStart + sepSamples + colorPorchSamples;
+    const colorEnd = colorStart + colorSamples;
+
+    for (let x = 0; x < WIDTH; x++) {
+        const idx = colorStart + Math.floor(x / WIDTH * (colorEnd - colorStart));
+        if (idx >= 0 && idx < freqs.length) {
+            colorData[x] = freqToValue(freqs[idx]);
+        } else {
+            colorData[x] = 128;
+        }
+    }
+
+    return { y: yData, color: colorData, isCrLine: isCrLine };
+}
+
+// Apply decoded line data to image buffers
+function applyLineToBuffers(lineNum, lineData) {
+    // Store Y data
+    liveYImage[lineNum] = lineData.y;
+
+    // Store color data to appropriate buffer
+    if (lineData.isCrLine) {
+        liveCrImage[lineNum] = lineData.color;
+        // Copy Cb from previous line if available
+        if (lineNum > 0) {
+            liveCbImage[lineNum] = liveCbImage[lineNum - 1].slice();
+        }
+    } else {
+        liveCbImage[lineNum] = lineData.color;
+        // Copy Cr from previous line if available
+        if (lineNum > 0) {
+            liveCrImage[lineNum] = liveCrImage[lineNum - 1].slice();
+        }
+    }
+}
+
 // Process incoming audio chunk in real-time
 function processStreamChunk(chunk) {
     appendToStreamBuffer(chunk);
 
-    // Need minimum buffer before we can reliably process
     if (streamBuffer.length < STREAM_MIN_BUFFER) {
         return;
     }
 
     // Find signal start if not started
     if (!streamStarted) {
-        // Look for leader tone (1900 Hz)
         const checkSamples = Math.min(chunk.length, 1000);
         let leaderCount = 0;
-
-        // Simple zero-crossing frequency estimation on the chunk
         let prevSample = chunk[0];
         let lastZero = 0;
 
@@ -507,7 +583,6 @@ function processStreamChunk(chunk) {
             streamLeaderCount++;
             if (streamLeaderCount >= 3) {
                 streamStarted = true;
-                // Estimate where image data starts (after header)
                 const headerDuration = LEADER_DURATION + BREAK_DURATION + 10 * VIS_BIT_DURATION + BREAK_DURATION;
                 streamImageStartIdx = streamBuffer.length + Math.floor(headerDuration * SAMPLE_RATE);
                 streamLastProcessed = streamImageStartIdx;
@@ -519,89 +594,36 @@ function processStreamChunk(chunk) {
         return;
     }
 
-    // Process any complete lines we have buffered
-    const syncSamples = Math.floor(SYNC_DURATION * SAMPLE_RATE);
-    const porchSamples = Math.floor(SYNC_PORCH_DURATION * SAMPLE_RATE);
-    const ySamples = Math.floor(Y_SCAN_DURATION * SAMPLE_RATE);
-    const sepSamples = Math.floor(SEPARATOR_DURATION * SAMPLE_RATE);
-    const colorPorchSamples = Math.floor(COLOR_PORCH_DURATION * SAMPLE_RATE);
-    const colorSamples = Math.floor(COLOR_SCAN_DURATION * SAMPLE_RATE);
-
+    // Process complete lines
     while (streamLineNum < HEIGHT) {
         const lineStart = streamImageStartIdx + streamLineNum * STREAM_LINE_SAMPLES;
         const lineEnd = lineStart + STREAM_LINE_SAMPLES;
 
-        // Need the full line plus some buffer
         if (lineEnd + 500 > streamBuffer.length) {
             break;
         }
 
-        // Demodulate this line
+        // Demodulate and decode this line
         const freqs = demodulateRealtime(streamBuffer, lineStart, lineEnd + 500);
+        const lineData = decodeSingleLine(freqs, 0);
 
-        // Extract Y data
-        const yStart = syncSamples + porchSamples;
-        const yEnd = yStart + ySamples;
-
-        for (let x = 0; x < WIDTH; x++) {
-            const idx = yStart + Math.floor(x / WIDTH * (yEnd - yStart));
-            if (idx < freqs.length) {
-                liveYImage[streamLineNum][x] = freqToValue(freqs[idx]);
-            }
-        }
-
-        // Detect separator tone to determine color channel
-        const sepStart = yEnd;
-        let sepFreqSum = 0;
-        for (let s = 0; s < sepSamples && sepStart + s < freqs.length; s++) {
-            sepFreqSum += freqs[sepStart + s];
-        }
-        const avgSepFreq = sepFreqSum / sepSamples;
-        const isCrLine = avgSepFreq < 1700;
-
-        // Extract color data
-        const colorStart = yEnd + sepSamples + colorPorchSamples;
-        const colorEnd = colorStart + colorSamples;
-        const colorImg = isCrLine ? liveCrImage : liveCbImage;
-
-        for (let x = 0; x < WIDTH; x++) {
-            const idx = colorStart + Math.floor(x / WIDTH * (colorEnd - colorStart));
-            if (idx < freqs.length) {
-                colorImg[streamLineNum][x] = freqToValue(freqs[idx]);
-            }
-        }
-
-        // Interpolate the other color channel from adjacent lines
-        if (streamLineNum > 0) {
-            if (isCrLine) {
-                // Copy Cb from previous line
-                for (let x = 0; x < WIDTH; x++) {
-                    liveCbImage[streamLineNum][x] = liveCbImage[streamLineNum - 1][x];
-                }
-            } else {
-                // Copy Cr from previous line
-                for (let x = 0; x < WIDTH; x++) {
-                    liveCrImage[streamLineNum][x] = liveCrImage[streamLineNum - 1][x];
-                }
-            }
-        }
+        // Apply to buffers
+        applyLineToBuffers(streamLineNum, lineData);
 
         streamLineNum++;
         liveLineCount = streamLineNum;
 
-        // Render this line immediately
+        // Render immediately
         renderLiveLine(streamLineNum);
         updateLineIndicator(streamLineNum);
 
-        // Update progress
         document.getElementById('rx-progress').style.width = (streamLineNum / HEIGHT * 100) + '%';
         document.getElementById('rx-status').textContent = `Decoding line ${streamLineNum}/${HEIGHT}...`;
 
-        // Mark that we have a good real-time decoded image
         hasRealtimeImage = true;
     }
 
-    // Trim processed buffer to save memory (keep last 2 lines)
+    // Trim buffer to save memory
     if (streamLineNum > 2) {
         const keepFrom = streamImageStartIdx + (streamLineNum - 2) * STREAM_LINE_SAMPLES;
         if (keepFrom > 0 && keepFrom < streamBuffer.length) {
@@ -614,14 +636,12 @@ function processStreamChunk(chunk) {
 
     // Check if complete
     if (streamLineNum >= HEIGHT) {
-        // Store for adjustment controls
-        decodedFreqs = null;  // Will be populated by full decode if needed
+        decodedFreqs = null;
         decodedLinesCount = streamLineNum;
 
         document.getElementById('rx-status').textContent = `Complete! Decoded ${streamLineNum} lines`;
         document.getElementById('rx-save').disabled = false;
 
-        // Stop recording
         setTimeout(() => {
             if (isListening) {
                 finishStreamDecode();
@@ -633,7 +653,6 @@ function processStreamChunk(chunk) {
 function finishStreamDecode() {
     stopListening();
 
-    // Store the full buffer for adjustment controls
     if (rxChunks.length > 0) {
         const totalLen = rxChunks.reduce((s, c) => s + c.length, 0);
         const combined = new Float32Array(totalLen);
@@ -643,7 +662,6 @@ function finishStreamDecode() {
             offset += chunk.length;
         }
 
-        // Run full FM demodulation for adjustment panel
         setTimeout(() => {
             try {
                 decodedFreqs = demodulateFFM(combined, null);
@@ -1170,15 +1188,11 @@ function decodeSSTV(audio, onProgress, onLine) {
 
     initLiveBuffers();
 
-    const syncSamples = Math.floor(SYNC_DURATION * SAMPLE_RATE);
-    const porchSamples = Math.floor(SYNC_PORCH_DURATION * SAMPLE_RATE);
-    const ySamples = Math.floor(Y_SCAN_DURATION * SAMPLE_RATE);
-    const sepSamples = Math.floor(SEPARATOR_DURATION * SAMPLE_RATE);
-    const colorPorchSamples = Math.floor(COLOR_PORCH_DURATION * SAMPLE_RATE);
-    const colorSamples = Math.floor(COLOR_SCAN_DURATION * SAMPLE_RATE);
     const lineSamples = Math.floor(LINE_DURATION * SAMPLE_RATE);
-
     let linesDecoded = 0;
+
+    // Track which lines have Cr vs Cb for proper interpolation
+    const lineHasCr = new Array(HEIGHT).fill(false);
 
     onProgress?.('Decoding lines...', 30);
 
@@ -1186,37 +1200,12 @@ function decodeSSTV(audio, onProgress, onLine) {
         const syncPos = syncPulses[i];
         if (syncPos + lineSamples > freqs.length) break;
 
-        const yStart = syncPos + syncSamples + porchSamples;
-        const yEnd = yStart + ySamples;
+        // Use unified line decoder with separator tone detection
+        const lineData = decodeSingleLine(freqs, syncPos);
 
-        for (let x = 0; x < WIDTH; x++) {
-            const idx = yStart + Math.floor(x / WIDTH * (yEnd - yStart));
-            if (idx < freqs.length) {
-                liveYImage[linesDecoded][x] = freqToValue(freqs[idx]);
-            }
-        }
-
-        const colorStart = yEnd + sepSamples + colorPorchSamples;
-        const colorEnd = colorStart + colorSamples;
-        const isEven = linesDecoded % 2 === 0;
-        // Even lines have Cr, odd lines have Cb (matching encoder)
-        const colorImg = isEven ? liveCrImage : liveCbImage;
-
-        for (let x = 0; x < WIDTH; x++) {
-            const idx = colorStart + Math.floor(x / WIDTH * (colorEnd - colorStart));
-            if (idx < freqs.length) {
-                colorImg[linesDecoded][x] = freqToValue(freqs[idx]);
-            }
-        }
-
-        // Copy the other channel from previous line
-        if (isEven && linesDecoded > 0) {
-            // Even line has Cr, copy Cb from previous
-            liveCbImage[linesDecoded] = liveCbImage[linesDecoded - 1].slice();
-        } else if (!isEven && linesDecoded > 0) {
-            // Odd line has Cb, copy Cr from previous
-            liveCrImage[linesDecoded] = liveCrImage[linesDecoded - 1].slice();
-        }
+        // Apply to buffers
+        applyLineToBuffers(linesDecoded, lineData);
+        lineHasCr[linesDecoded] = lineData.isCrLine;
 
         linesDecoded++;
         liveLineCount = linesDecoded;
@@ -1237,19 +1226,37 @@ function decodeSSTV(audio, onProgress, onLine) {
 
     onProgress?.('Interpolating colors...', 92);
 
-    // Even lines have Cr, need to interpolate Cb
-    // Odd lines have Cb, need to interpolate Cr
+    // Interpolate missing color channels based on what each line actually has
     for (let i = 1; i < linesDecoded - 1; i++) {
-        const isEven = i % 2 === 0;
-        if (isEven) {
-            // Even line has Cr, interpolate Cb from adjacent odd lines
-            for (let x = 0; x < WIDTH; x++) {
-                liveCbImage[i][x] = Math.floor((liveCbImage[i - 1][x] + liveCbImage[i + 1][x]) / 2);
+        if (lineHasCr[i]) {
+            // Line has Cr, interpolate Cb from adjacent lines that have Cb
+            let prevCb = -1, nextCb = -1;
+            for (let j = i - 1; j >= 0; j--) {
+                if (!lineHasCr[j]) { prevCb = j; break; }
+            }
+            for (let j = i + 1; j < linesDecoded; j++) {
+                if (!lineHasCr[j]) { nextCb = j; break; }
+            }
+            if (prevCb >= 0 && nextCb >= 0) {
+                const t = (i - prevCb) / (nextCb - prevCb);
+                for (let x = 0; x < WIDTH; x++) {
+                    liveCbImage[i][x] = Math.floor(liveCbImage[prevCb][x] * (1 - t) + liveCbImage[nextCb][x] * t);
+                }
             }
         } else {
-            // Odd line has Cb, interpolate Cr from adjacent even lines
-            for (let x = 0; x < WIDTH; x++) {
-                liveCrImage[i][x] = Math.floor((liveCrImage[i - 1][x] + liveCrImage[i + 1][x]) / 2);
+            // Line has Cb, interpolate Cr from adjacent lines that have Cr
+            let prevCr = -1, nextCr = -1;
+            for (let j = i - 1; j >= 0; j--) {
+                if (lineHasCr[j]) { prevCr = j; break; }
+            }
+            for (let j = i + 1; j < linesDecoded; j++) {
+                if (lineHasCr[j]) { nextCr = j; break; }
+            }
+            if (prevCr >= 0 && nextCr >= 0) {
+                const t = (i - prevCr) / (nextCr - prevCr);
+                for (let x = 0; x < WIDTH; x++) {
+                    liveCrImage[i][x] = Math.floor(liveCrImage[prevCr][x] * (1 - t) + liveCrImage[nextCr][x] * t);
+                }
             }
         }
     }
