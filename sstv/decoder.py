@@ -7,7 +7,7 @@ Decodes Robot36 SSTV audio signals back into images.
 import numpy as np
 from PIL import Image
 from scipy.io import wavfile
-from scipy.signal import hilbert, butter, filtfilt
+from scipy.signal import hilbert, butter, filtfilt, medfilt
 
 from .constants import Robot36, SSTVUtils
 
@@ -33,7 +33,14 @@ class Robot36Decoder:
         nyquist = self.sample_rate / 2
         low = low_freq / nyquist
         high = high_freq / nyquist
-        b, a = butter(4, [low, high], btype='band')
+        b, a = butter(5, [low, high], btype='band')
+        return filtfilt(b, a, signal)
+
+    def _lowpass_filter(self, signal, cutoff=1000):
+        """Apply lowpass filter to smooth frequency estimates"""
+        nyquist = self.sample_rate / 2
+        normalized_cutoff = cutoff / nyquist
+        b, a = butter(3, normalized_cutoff, btype='low')
         return filtfilt(b, a, signal)
 
     def _demodulate_fm(self, signal):
@@ -49,7 +56,7 @@ class Robot36Decoder:
         Returns:
             Array of instantaneous frequencies in Hz
         """
-        # Apply bandpass filter
+        # Apply bandpass filter to isolate SSTV frequencies
         filtered = self._bandpass_filter(signal)
 
         # Get analytic signal via Hilbert transform
@@ -64,6 +71,12 @@ class Robot36Decoder:
         # Pad to maintain array length
         freq = np.concatenate([[freq[0]], freq])
 
+        # Apply lowpass filter to smooth frequency estimates
+        freq = self._lowpass_filter(freq, cutoff=800)
+
+        # Clip to valid SSTV range
+        freq = np.clip(freq, 1100, 2400)
+
         return freq
 
     def _freq_to_pixels(self, frequencies):
@@ -71,7 +84,7 @@ class Robot36Decoder:
         pixels = (frequencies - Robot36.FREQ_BLACK) / (Robot36.FREQ_WHITE - Robot36.FREQ_BLACK) * 255
         return np.clip(pixels, 0, 255).astype(np.uint8)
 
-    def _find_sync_pulses(self, frequencies, threshold=1250):
+    def _find_sync_pulses(self, frequencies):
         """
         Find sync pulse positions in the frequency data.
 
@@ -79,134 +92,166 @@ class Robot36Decoder:
 
         Args:
             frequencies: Demodulated frequency values
-            threshold: Frequency threshold for sync detection
 
         Returns:
             List of sample indices where sync pulses start
         """
+        sync_threshold = 1350  # Below this is considered sync region
+        min_sync_samples = int(0.006 * self.sample_rate)  # At least 6ms
+        max_sync_samples = int(0.015 * self.sample_rate)  # At most 15ms
+
         # Find where frequency is below threshold (sync region)
-        is_sync = frequencies < threshold
+        is_sync = frequencies < sync_threshold
 
         # Find transitions from non-sync to sync
-        sync_starts = np.where(np.diff(is_sync.astype(int)) == 1)[0]
+        sync_starts = np.where(np.diff(is_sync.astype(int)) == 1)[0] + 1
 
-        # Filter by minimum sync duration (at least 7ms)
-        min_sync_samples = int(0.007 * self.sample_rate)
         valid_syncs = []
 
         for start in sync_starts:
-            # Check if sync pulse is long enough
+            # Find end of sync pulse
             end = start
             while end < len(is_sync) and is_sync[end]:
                 end += 1
 
             sync_duration = end - start
-            if sync_duration >= min_sync_samples:
-                valid_syncs.append(start)
+
+            # Valid sync pulse duration check
+            if min_sync_samples <= sync_duration <= max_sync_samples:
+                # Check average frequency is close to 1200 Hz
+                avg_freq = np.mean(frequencies[start:end])
+                if avg_freq < 1300:
+                    valid_syncs.append(start)
 
         return valid_syncs
 
-    def _detect_vis_code(self, frequencies):
+    def _filter_sync_pulses(self, sync_pulses):
         """
-        Detect and decode the VIS code from the header.
+        Filter sync pulses to keep only line syncs at expected intervals.
+
+        Args:
+            sync_pulses: List of detected sync positions
 
         Returns:
-            tuple: (VIS code value, sample index after VIS)
+            List of filtered sync positions
         """
-        # Find leader tone (1900 Hz)
+        if len(sync_pulses) < 2:
+            return sync_pulses
+
+        # Expected line duration in samples
+        expected_line_samples = int(Robot36.get_total_line_duration() * self.sample_rate)
+        tolerance = int(0.005 * self.sample_rate)  # 5ms tolerance
+
+        filtered = [sync_pulses[0]]
+
+        for sync in sync_pulses[1:]:
+            # Distance from last accepted sync
+            dist = sync - filtered[-1]
+
+            # Accept if close to expected line duration
+            if abs(dist - expected_line_samples) < tolerance:
+                filtered.append(sync)
+            # Or if it's approximately a multiple (we might have missed some)
+            elif dist > expected_line_samples * 0.8:
+                # Check if this could be a valid next line
+                filtered.append(sync)
+
+        return filtered
+
+    def _detect_header_end(self, frequencies):
+        """
+        Detect the end of the SSTV header (after VIS code).
+
+        Returns:
+            Sample index where image data begins
+        """
+        # Look for leader tone (1900 Hz)
         leader_freq = Robot36.LEADER_TONE_FREQ
-        tolerance = 100
+        tolerance = 150
 
-        # Look for sustained 1900 Hz tone
-        is_leader = np.abs(frequencies - leader_freq) < tolerance
+        # Search for sustained 1900 Hz tone
+        window_samples = int(0.05 * self.sample_rate)  # 50ms window
 
-        # Find where leader starts
         leader_start = None
-        for i in range(len(is_leader) - int(0.1 * self.sample_rate)):
-            if np.mean(is_leader[i:i + int(0.1 * self.sample_rate)]) > 0.7:
+        for i in range(0, len(frequencies) - window_samples, window_samples // 2):
+            window = frequencies[i:i + window_samples]
+            if np.mean(np.abs(window - leader_freq) < tolerance) > 0.6:
                 leader_start = i
                 break
 
         if leader_start is None:
-            return None, 0
+            print("Warning: Could not detect leader tone")
+            return 0
 
-        # Find end of leader (transition to 1200 Hz break)
+        # Find end of leader tone (drops to 1200 Hz)
         leader_end = leader_start
-        for i in range(leader_start, len(frequencies)):
-            if frequencies[i] < 1300:
+        for i in range(leader_start + window_samples, len(frequencies)):
+            if frequencies[i] < 1400:
                 leader_end = i
                 break
 
-        # Skip break (10ms)
-        break_end = leader_end + int(Robot36.BREAK_DURATION * self.sample_rate)
+        # Skip header components:
+        # - Break: 10ms
+        # - VIS: 10 bits * 30ms = 300ms
+        # - Final break: 10ms
+        header_duration = (
+            Robot36.BREAK_DURATION +
+            10 * Robot36.VIS_BIT_DURATION +
+            Robot36.BREAK_DURATION
+        )
 
-        # Decode VIS bits
-        vis_code = 0
-        bit_samples = int(Robot36.VIS_BIT_DURATION * self.sample_rate)
+        image_start = leader_end + int(header_duration * self.sample_rate)
 
-        # Skip start bit
-        pos = break_end + bit_samples
+        return min(image_start, len(frequencies) - 1)
 
-        # Read 7 data bits (LSB first)
-        for i in range(7):
-            bit_region = frequencies[pos:pos + bit_samples]
-            avg_freq = np.mean(bit_region)
-
-            # 1100 Hz = 1, 1300 Hz = 0
-            if avg_freq < 1200:
-                vis_code |= (1 << i)
-
-            pos += bit_samples
-
-        # Skip parity bit
-        pos += bit_samples
-
-        # Skip stop bit
-        pos += bit_samples
-
-        # Skip final break
-        pos += int(Robot36.BREAK_DURATION * self.sample_rate)
-
-        return vis_code, pos
-
-    def _extract_line_data(self, frequencies, line_start, is_even):
+    def _extract_line_data(self, frequencies, line_start):
         """
         Extract Y and color data from a scan line.
 
         Args:
             frequencies: Demodulated frequency values
             line_start: Sample index where line sync starts
-            is_even: True for even lines (R-Y), False for odd (B-Y)
 
         Returns:
             tuple: (y_data, color_data) as numpy arrays of pixel values
         """
-        # Skip sync pulse (9ms)
-        pos = line_start + int(Robot36.SYNC_PULSE_DURATION * self.sample_rate)
-
-        # Skip sync porch (3ms)
-        pos += int(Robot36.SYNC_PORCH_DURATION * self.sample_rate)
-
-        # Extract Y data (88ms)
+        # Calculate sample positions
+        sync_samples = int(Robot36.SYNC_PULSE_DURATION * self.sample_rate)
+        porch_samples = int(Robot36.SYNC_PORCH_DURATION * self.sample_rate)
         y_samples = int(Robot36.Y_SCAN_DURATION * self.sample_rate)
-        y_region = frequencies[pos:pos + y_samples]
+        sep_samples = int(Robot36.SEPARATOR_DURATION * self.sample_rate)
+        color_porch_samples = int(Robot36.COLOR_PORCH_DURATION * self.sample_rate)
+        color_samples = int(Robot36.COLOR_SCAN_DURATION * self.sample_rate)
+
+        # Skip sync pulse and porch
+        y_start = line_start + sync_samples + porch_samples
+
+        # Extract Y data
+        y_end = y_start + y_samples
+        if y_end > len(frequencies):
+            y_end = len(frequencies)
+
+        y_region = frequencies[y_start:y_end]
+
+        if len(y_region) < 10:
+            return np.full(Robot36.WIDTH, 128, dtype=np.uint8), np.full(Robot36.WIDTH, 128, dtype=np.uint8)
 
         # Resample Y data to WIDTH pixels
         y_indices = np.linspace(0, len(y_region) - 1, Robot36.WIDTH)
         y_data = np.interp(y_indices, np.arange(len(y_region)), y_region)
         y_data = self._freq_to_pixels(y_data)
 
-        pos += y_samples
+        # Extract color data
+        color_start = y_end + sep_samples + color_porch_samples
+        color_end = color_start + color_samples
 
-        # Skip separator (4.5ms)
-        pos += int(Robot36.SEPARATOR_DURATION * self.sample_rate)
+        if color_end > len(frequencies):
+            color_end = len(frequencies)
 
-        # Skip color porch (1.5ms)
-        pos += int(Robot36.COLOR_PORCH_DURATION * self.sample_rate)
+        color_region = frequencies[color_start:color_end]
 
-        # Extract color data (44ms)
-        color_samples = int(Robot36.COLOR_SCAN_DURATION * self.sample_rate)
-        color_region = frequencies[pos:pos + color_samples]
+        if len(color_region) < 10:
+            return y_data, np.full(Robot36.WIDTH, 128, dtype=np.uint8)
 
         # Resample color data to WIDTH pixels
         color_indices = np.linspace(0, len(color_region) - 1, Robot36.WIDTH)
@@ -230,6 +275,7 @@ class Robot36Decoder:
         if isinstance(audio, str):
             rate, audio = wavfile.read(audio)
             self.sample_rate = rate
+            print(f"Loaded audio: {len(audio)} samples at {rate} Hz")
 
             # Convert to float if integer
             if audio.dtype == np.int16:
@@ -241,32 +287,37 @@ class Robot36Decoder:
             if len(audio.shape) > 1:
                 audio = np.mean(audio, axis=1)
 
-        # Demodulate FM signal
+        print("Demodulating FM signal...")
         frequencies = self._demodulate_fm(audio)
 
-        # Detect VIS code and find image start
-        vis_code, image_start = self._detect_vis_code(frequencies)
-
-        if vis_code is not None:
-            print(f"Detected VIS code: {vis_code} (expected {Robot36.VIS_CODE} for Robot36)")
-        else:
-            print("Warning: Could not detect VIS code, attempting to find sync pulses directly")
-            image_start = 0
+        # Detect header end
+        print("Detecting header...")
+        image_start = self._detect_header_end(frequencies)
+        print(f"Image data starts at sample {image_start}")
 
         # Find all sync pulses after header
+        print("Finding sync pulses...")
         sync_pulses = self._find_sync_pulses(frequencies[image_start:])
         sync_pulses = [s + image_start for s in sync_pulses]
+        print(f"Found {len(sync_pulses)} potential sync pulses")
+
+        # Filter to keep valid line syncs
+        sync_pulses = self._filter_sync_pulses(sync_pulses)
+        print(f"Filtered to {len(sync_pulses)} line syncs")
 
         # Initialize image arrays
+        # Important: Cr and Cb should be 128 for neutral gray, not 0!
         y_image = np.zeros((Robot36.HEIGHT, Robot36.WIDTH), dtype=np.uint8)
-        cr_image = np.zeros((Robot36.HEIGHT, Robot36.WIDTH), dtype=np.uint8)
-        cb_image = np.zeros((Robot36.HEIGHT, Robot36.WIDTH), dtype=np.uint8)
+        cr_image = np.full((Robot36.HEIGHT, Robot36.WIDTH), 128, dtype=np.uint8)
+        cb_image = np.full((Robot36.HEIGHT, Robot36.WIDTH), 128, dtype=np.uint8)
 
         # Estimate line duration in samples
         line_samples = int(Robot36.get_total_line_duration() * self.sample_rate)
 
         # Process each line
+        print("Decoding scan lines...")
         lines_decoded = 0
+
         for i, sync_pos in enumerate(sync_pulses):
             if lines_decoded >= Robot36.HEIGHT:
                 break
@@ -275,23 +326,18 @@ class Robot36Decoder:
             if sync_pos + line_samples > len(frequencies):
                 break
 
-            is_even = (lines_decoded % 2) == 0
-
             try:
-                y_data, color_data = self._extract_line_data(frequencies, sync_pos, is_even)
+                y_data, color_data = self._extract_line_data(frequencies, sync_pos)
 
                 y_image[lines_decoded] = y_data
 
+                # Robot36: even lines have R-Y (Cr), odd lines have B-Y (Cb)
+                is_even = (lines_decoded % 2) == 0
+
                 if is_even:
                     cr_image[lines_decoded] = color_data
-                    # Interpolate Cb from adjacent lines
-                    if lines_decoded > 0:
-                        cb_image[lines_decoded] = cb_image[lines_decoded - 1]
                 else:
                     cb_image[lines_decoded] = color_data
-                    # Interpolate Cr from previous line
-                    if lines_decoded > 0:
-                        cr_image[lines_decoded] = cr_image[lines_decoded - 1]
 
                 lines_decoded += 1
 
@@ -302,15 +348,38 @@ class Robot36Decoder:
         print(f"Decoded {lines_decoded} lines")
 
         # Interpolate missing color values for alternating lines
-        for i in range(1, lines_decoded):
-            if i % 2 == 0:
-                # Even line - interpolate Cb
-                if i + 1 < lines_decoded:
-                    cb_image[i] = ((cb_image[i - 1].astype(int) + cb_image[i + 1].astype(int)) // 2).astype(np.uint8)
+        # Even lines have Cr, need to interpolate Cb
+        # Odd lines have Cb, need to interpolate Cr
+        for i in range(lines_decoded):
+            is_even = (i % 2) == 0
+
+            if is_even:
+                # Even line - has Cr, need Cb
+                # Use Cb from adjacent odd lines
+                if i > 0:
+                    cb_image[i] = cb_image[i - 1]
+                elif i + 1 < lines_decoded:
+                    cb_image[i] = cb_image[i + 1]
             else:
-                # Odd line - interpolate Cr
-                if i + 1 < lines_decoded:
-                    cr_image[i] = ((cr_image[i - 1].astype(int) + cr_image[i + 1].astype(int)) // 2).astype(np.uint8)
+                # Odd line - has Cb, need Cr
+                # Use Cr from adjacent even lines
+                if i > 0:
+                    cr_image[i] = cr_image[i - 1]
+                elif i + 1 < lines_decoded:
+                    cr_image[i] = cr_image[i + 1]
+
+        # Second pass: average interpolation where possible
+        for i in range(1, lines_decoded - 1):
+            is_even = (i % 2) == 0
+
+            if is_even:
+                # Average Cb from lines above and below
+                cb_image[i] = ((cb_image[i - 1].astype(np.int32) +
+                                cb_image[i + 1].astype(np.int32)) // 2).astype(np.uint8)
+            else:
+                # Average Cr from lines above and below
+                cr_image[i] = ((cr_image[i - 1].astype(np.int32) +
+                                cr_image[i + 1].astype(np.int32)) // 2).astype(np.uint8)
 
         # Combine YCrCb channels
         ycrcb = np.stack([y_image, cr_image, cb_image], axis=-1)
@@ -324,6 +393,7 @@ class Robot36Decoder:
         # Save if path provided
         if output_path:
             image.save(output_path)
+            print(f"Saved decoded image to {output_path}")
 
         return image
 
