@@ -8,113 +8,111 @@
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            background: #111;
             min-height: 100vh;
             color: #fff;
+            padding: 1rem;
         }
-        .tabs { display: flex; background: rgba(0,0,0,0.3); }
-        .tab { flex: 1; padding: 1rem; text-align: center; cursor: pointer; border-bottom: 3px solid transparent; }
-        .tab:hover { background: rgba(255,255,255,0.05); }
-        .tab.active { border-color: #4ecdc4; background: rgba(78,205,196,0.1); }
-        .content { display: none; padding: 1rem; max-width: 800px; margin: 0 auto; }
+        .tabs { display: flex; gap: 1px; margin-bottom: 1rem; }
+        .tab {
+            flex: 1; padding: 0.75rem; text-align: center; cursor: pointer;
+            background: #222; border: none; color: #888;
+        }
+        .tab.active { background: #333; color: #fff; }
+        .content { display: none; }
         .content.active { display: block; }
-        .panel { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem; }
-        .panel h2 { font-size: 0.9rem; color: #8892b0; margin-bottom: 1rem; text-transform: uppercase; }
-        .image-box { width: 320px; height: 240px; background: #000; border: 2px solid rgba(255,255,255,0.2); border-radius: 8px; margin: 0 auto; display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: pointer; position: relative; }
-        .image-box canvas { max-width: 100%; max-height: 100%; }
-        .placeholder { color: #8892b0; text-align: center; }
-        .controls { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 1rem; justify-content: center; }
-        button { background: #4ecdc4; color: #fff; border: none; padding: 0.75rem 1.5rem; border-radius: 8px; cursor: pointer; font-size: 1rem; }
-        button:hover { background: #3dbdb5; }
-        button:disabled { opacity: 0.5; cursor: not-allowed; }
-        button.secondary { background: rgba(255,255,255,0.1); }
-        button.recording { background: #e74c3c; animation: pulse 1s infinite; }
-        button.detecting { background: #f39c12; animation: pulse 1s infinite; }
-        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.7; } }
-        .status { text-align: center; margin-top: 1rem; color: #8892b0; min-height: 1.5em; }
-        .status.active { color: #2ecc71; }
-        .status.waiting { color: #f39c12; }
-        .waveform { height: 60px; background: #000; border-radius: 8px; margin-top: 1rem; }
-        .waveform canvas { width: 100%; height: 100%; display: block; }
-        .progress { height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; margin-top: 0.5rem; overflow: hidden; }
-        .progress-fill { height: 100%; background: #4ecdc4; width: 0%; transition: width 0.1s; }
+        .section { background: #1a1a1a; padding: 1rem; margin-bottom: 1rem; border-radius: 4px; }
+        .image-box {
+            width: 320px; height: 240px; background: #000; margin: 0 auto 1rem;
+            display: flex; align-items: center; justify-content: center;
+            position: relative; cursor: pointer;
+        }
+        .image-box canvas { display: block; }
+        .placeholder { color: #444; }
+        .controls { display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap; }
+        button {
+            background: #333; color: #fff; border: none;
+            padding: 0.5rem 1rem; cursor: pointer; font-size: 0.9rem;
+        }
+        button:hover { background: #444; }
+        button:disabled { opacity: 0.3; cursor: not-allowed; }
+        button.primary { background: #0a0; }
+        button.primary:hover { background: #0b0; }
+        button.recording { background: #a00; }
+        .status { text-align: center; color: #666; margin-top: 0.5rem; font-size: 0.85rem; }
+        .progress { height: 3px; background: #222; margin-top: 0.5rem; }
+        .progress-fill { height: 100%; background: #0a0; width: 0%; }
         input[type="file"] { display: none; }
-        .freq-display { font-family: monospace; font-size: 1.5rem; text-align: center; color: #4ecdc4; padding: 0.5rem; }
-        .freq-display.leader { color: #2ecc71; }
-        .freq-display.sync { color: #e74c3c; }
-        .freq-display.data { color: #f39c12; }
-        .signal-bar { height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; margin-top: 0.5rem; overflow: hidden; }
-        .signal-fill { height: 100%; background: linear-gradient(90deg, #e74c3c 0%, #f1c40f 50%, #2ecc71 100%); width: 0%; transition: width 0.1s; }
-        .hint { font-size: 0.8rem; color: #8892b0; text-align: center; margin-top: 0.5rem; }
-        .line-indicator { position: absolute; bottom: 5px; right: 5px; background: rgba(0,0,0,0.7); padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-family: monospace; }
-        .mode-toggle { display: flex; gap: 0.5rem; justify-content: center; margin-bottom: 1rem; }
-        .mode-btn { padding: 0.5rem 1rem; font-size: 0.85rem; border-radius: 20px; }
-        .mode-btn.active { background: #4ecdc4; }
-        .mode-btn:not(.active) { background: rgba(255,255,255,0.1); }
-
+        .line-indicator {
+            position: absolute; bottom: 4px; right: 4px;
+            background: rgba(0,0,0,0.8); padding: 2px 6px;
+            font-size: 0.75rem; font-family: monospace;
+        }
+        .slider-row {
+            display: flex; align-items: center; gap: 0.5rem;
+            margin-top: 0.75rem; font-size: 0.85rem;
+        }
+        .slider-row label { width: 50px; color: #888; }
+        .slider-row input[type="range"] {
+            flex: 1; height: 4px; -webkit-appearance: none;
+            background: #333; border-radius: 2px; outline: none;
+        }
+        .slider-row input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; width: 14px; height: 14px;
+            background: #fff; border-radius: 50%; cursor: pointer;
+        }
+        .slider-row .value { width: 50px; text-align: right; font-family: monospace; color: #0a0; }
     </style>
 </head>
 <body>
     <div class="tabs">
-        <div class="tab active" onclick="showTab('tx')">TX (Encode)</div>
-        <div class="tab" onclick="showTab('rx')">RX (Decode)</div>
+        <div class="tab active" onclick="showTab('tx')">TX</div>
+        <div class="tab" onclick="showTab('rx')">RX</div>
     </div>
 
     <div id="tx" class="content active">
-        <div class="panel">
-            <h2>Image</h2>
+        <div class="section">
             <div class="image-box" onclick="document.getElementById('file').click()">
                 <canvas id="tx-canvas" width="320" height="240" style="display:none;"></canvas>
-                <div class="placeholder" id="tx-placeholder">Click to upload</div>
+                <div class="placeholder" id="tx-placeholder">Click to load image</div>
             </div>
             <input type="file" id="file" accept="image/*">
             <div class="controls">
-                <button onclick="document.getElementById('file').click()" class="secondary">Upload</button>
+                <button id="tx-btn" onclick="transmit()" disabled class="primary">Transmit</button>
+                <button id="tx-stop" onclick="stopTx()" disabled>Stop</button>
             </div>
-        </div>
-        <div class="panel">
-            <h2>Transmit</h2>
-            <div class="controls">
-                <button id="tx-btn" onclick="transmit()" disabled>Transmit</button>
-                <button id="tx-stop" onclick="stopTx()" disabled class="secondary">Stop</button>
-            </div>
-            <div class="waveform"><canvas id="tx-wave"></canvas></div>
             <div class="progress"><div class="progress-fill" id="tx-progress"></div></div>
-            <div class="status" id="tx-status">Upload an image</div>
+            <div class="status" id="tx-status">Load an image to transmit</div>
         </div>
     </div>
 
     <div id="rx" class="content">
-        <div class="panel">
-            <h2>Audio Input</h2>
-            <div class="mode-toggle">
-                <button class="mode-btn active" id="mode-auto" onclick="setMode('auto')">Auto Detect</button>
-                <button class="mode-btn" id="mode-manual" onclick="setMode('manual')">Manual</button>
-            </div>
-            <div class="controls">
-                <button id="rx-btn" onclick="toggleRx()">Start Listening</button>
-                <button onclick="document.getElementById('audio-file').click()" class="secondary">Load Audio File</button>
-            </div>
-            <input type="file" id="audio-file" accept="audio/*,.wav,.mp3,.ogg,.m4a">
-            <div class="freq-display" id="freq-display">-- Hz</div>
-            <div class="signal-bar"><div class="signal-fill" id="signal-bar"></div></div>
-            <div class="waveform"><canvas id="rx-wave"></canvas></div>
-            <div class="progress"><div class="progress-fill" id="rx-progress"></div></div>
-            <div class="status" id="rx-status">Click "Start Listening" - will auto-detect Robot36 signal</div>
-            <div class="hint" id="rx-hint">Auto mode: Waits for 1900Hz leader tone, decodes lines in real-time</div>
-        </div>
-        <div class="panel">
-            <h2>Decoded Image</h2>
-            <div class="image-box" style="cursor:default;">
+        <div class="section">
+            <div class="image-box">
                 <canvas id="rx-canvas" width="320" height="240"></canvas>
-                <div class="placeholder" id="rx-placeholder">Image will appear here</div>
+                <div class="placeholder" id="rx-placeholder">Decoded image</div>
                 <div class="line-indicator" id="line-indicator" style="display:none;">0/240</div>
             </div>
             <div class="controls">
-                <button id="rx-save" onclick="saveImage()" disabled class="secondary">Save Image</button>
-                <button id="rx-clear" onclick="clearRx()" class="secondary">Clear</button>
+                <button id="rx-btn" onclick="toggleRx()" class="primary">Start</button>
+                <button onclick="document.getElementById('audio-file').click()">Load Audio</button>
+                <button id="rx-save" onclick="saveImage()" disabled>Save</button>
+                <button onclick="clearRx()">Clear</button>
             </div>
+            <input type="file" id="audio-file" accept="audio/*,.wav,.mp3,.ogg,.m4a">
+            <div class="progress"><div class="progress-fill" id="rx-progress"></div></div>
+            <div class="status" id="rx-status">Click Start to listen for signal</div>
 
+            <div class="slider-row">
+                <label>Phase</label>
+                <input type="range" id="phase-slider" min="-5000" max="5000" value="0" oninput="adjustDecode()">
+                <span class="value" id="phase-value">0</span>
+            </div>
+            <div class="slider-row">
+                <label>Skew</label>
+                <input type="range" id="skew-slider" min="-50" max="50" value="0" step="0.5" oninput="adjustDecode()">
+                <span class="value" id="skew-value">0</span>
+            </div>
         </div>
     </div>
 
@@ -150,6 +148,10 @@ const COLOR_SCAN_DURATION = 0.044;
 const LINE_DURATION = SYNC_DURATION + SYNC_PORCH_DURATION + Y_SCAN_DURATION +
                       SEPARATOR_DURATION + COLOR_PORCH_DURATION + COLOR_SCAN_DURATION;
 const TOTAL_DURATION = LINE_DURATION * HEIGHT + 0.7;
+
+// Store decoded data for phase/skew adjustment
+let decodedFreqs = null;
+let decodedImageStart = 0;
 
 // ============================================
 // Color Conversion
@@ -816,6 +818,111 @@ function detectSignalStart(freqs) {
     return 0;
 }
 
+// Adjust decode with phase and skew
+function adjustDecode() {
+    const phase = parseInt(document.getElementById('phase-slider').value);
+    const skew = parseFloat(document.getElementById('skew-slider').value);
+
+    document.getElementById('phase-value').textContent = phase;
+    document.getElementById('skew-value').textContent = skew;
+
+    if (!decodedFreqs) return;
+
+    const freqs = decodedFreqs;
+    const baseLineSamples = Math.floor(LINE_DURATION * SAMPLE_RATE);
+    const syncSamples = Math.floor(SYNC_DURATION * SAMPLE_RATE);
+    const porchSamples = Math.floor(SYNC_PORCH_DURATION * SAMPLE_RATE);
+    const ySamples = Math.floor(Y_SCAN_DURATION * SAMPLE_RATE);
+    const sepSamples = Math.floor(SEPARATOR_DURATION * SAMPLE_RATE);
+    const colorPorchSamples = Math.floor(COLOR_PORCH_DURATION * SAMPLE_RATE);
+    const colorSamples = Math.floor(COLOR_SCAN_DURATION * SAMPLE_RATE);
+
+    // Re-init buffers
+    liveYImage = new Array(HEIGHT).fill(null).map(() => new Uint8Array(WIDTH).fill(128));
+    liveCrImage = new Array(HEIGHT).fill(null).map(() => new Uint8Array(WIDTH).fill(128));
+    liveCbImage = new Array(HEIGHT).fill(null).map(() => new Uint8Array(WIDTH).fill(128));
+
+    const lineHasCr = [];
+
+    for (let line = 0; line < HEIGHT; line++) {
+        const lineSamples = baseLineSamples + skew;
+        const lineStart = decodedImageStart + phase + Math.floor(line * lineSamples);
+
+        if (lineStart < 0 || lineStart + baseLineSamples > freqs.length) {
+            lineHasCr.push(line % 2 === 0);
+            continue;
+        }
+
+        // Extract Y
+        const yStart = lineStart + syncSamples + porchSamples;
+        const yEnd = yStart + ySamples;
+
+        for (let x = 0; x < WIDTH; x++) {
+            const idx = yStart + Math.floor(x / WIDTH * (yEnd - yStart));
+            if (idx >= 0 && idx < freqs.length) {
+                liveYImage[line][x] = freqToValue(freqs[idx]);
+            }
+        }
+
+        // Detect separator tone
+        const sepStart = yEnd;
+        let sepFreqSum = 0;
+        for (let s = 0; s < sepSamples && sepStart + s < freqs.length; s++) {
+            sepFreqSum += freqs[sepStart + s];
+        }
+        const avgSepFreq = sepFreqSum / sepSamples;
+        const isCrLine = avgSepFreq < 1900;
+        lineHasCr.push(isCrLine);
+
+        // Extract color
+        const colorStart = sepStart + sepSamples + colorPorchSamples;
+        const colorEnd = colorStart + colorSamples;
+        const colorImg = isCrLine ? liveCrImage : liveCbImage;
+
+        for (let x = 0; x < WIDTH; x++) {
+            const idx = colorStart + Math.floor(x / WIDTH * (colorEnd - colorStart));
+            if (idx >= 0 && idx < freqs.length) {
+                colorImg[line][x] = freqToValue(freqs[idx]);
+            }
+        }
+    }
+
+    // Interpolate missing channels
+    for (let line = 1; line < HEIGHT - 1; line++) {
+        if (lineHasCr[line]) {
+            let prev = -1, next = -1;
+            for (let j = line - 1; j >= 0; j--) if (!lineHasCr[j]) { prev = j; break; }
+            for (let j = line + 1; j < HEIGHT; j++) if (!lineHasCr[j]) { next = j; break; }
+            if (prev >= 0 && next >= 0) {
+                const t = (line - prev) / (next - prev);
+                for (let x = 0; x < WIDTH; x++) {
+                    liveCbImage[line][x] = Math.floor(liveCbImage[prev][x] * (1 - t) + liveCbImage[next][x] * t);
+                }
+            } else if (prev >= 0) {
+                liveCbImage[line] = liveCbImage[prev].slice();
+            } else if (next >= 0) {
+                liveCbImage[line] = liveCbImage[next].slice();
+            }
+        } else {
+            let prev = -1, next = -1;
+            for (let j = line - 1; j >= 0; j--) if (lineHasCr[j]) { prev = j; break; }
+            for (let j = line + 1; j < HEIGHT; j++) if (lineHasCr[j]) { next = j; break; }
+            if (prev >= 0 && next >= 0) {
+                const t = (line - prev) / (next - prev);
+                for (let x = 0; x < WIDTH; x++) {
+                    liveCrImage[line][x] = Math.floor(liveCrImage[prev][x] * (1 - t) + liveCrImage[next][x] * t);
+                }
+            } else if (prev >= 0) {
+                liveCrImage[line] = liveCrImage[prev].slice();
+            } else if (next >= 0) {
+                liveCrImage[line] = liveCrImage[next].slice();
+            }
+        }
+    }
+
+    renderFullImage();
+}
+
 function decodeSSTV(audio, onProgress, onLine) {
     console.log('Decoding', audio.length, 'samples...');
     onProgress?.('Starting decode...', 0);
@@ -836,8 +943,12 @@ function decodeSSTV(audio, onProgress, onLine) {
     // FM demodulation
     const freqs = demodulateFFM(audio, onProgress);
 
+    // Store for phase/skew adjustment
+    decodedFreqs = freqs;
+
     onProgress?.('Finding signal start...', 10);
     const imageStart = detectSignalStart(freqs);
+    decodedImageStart = imageStart;
     console.log('Image starts at sample', imageStart);
 
     onProgress?.('Finding sync pulses...', 20);
@@ -890,7 +1001,6 @@ function decodeSSTV(audio, onProgress, onLine) {
     }
 
     console.log('Decoded', linesDecoded, 'lines');
-    decodedLinesCount = linesDecoded;
 
     if (linesDecoded < 3) {
         return null;
@@ -958,20 +1068,6 @@ function showTab(id) {
     document.getElementById(id).classList.add('active');
 }
 
-function setMode(mode) {
-    rxMode = mode;
-    document.getElementById('mode-auto').classList.toggle('active', mode === 'auto');
-    document.getElementById('mode-manual').classList.toggle('active', mode === 'manual');
-
-    if (mode === 'auto') {
-        document.getElementById('rx-hint').textContent = 'Auto mode: Waits for 1900Hz leader tone, decodes lines in real-time';
-        document.getElementById('rx-status').textContent = 'Click "Start Listening" - will auto-detect Robot36 signal';
-    } else {
-        document.getElementById('rx-hint').textContent = 'Manual mode: Decodes in real-time, click Stop when done';
-        document.getElementById('rx-status').textContent = 'Click "Start Listening" to begin recording';
-    }
-}
-
 document.getElementById('file').onchange = e => {
     const file = e.target.files[0];
     if (!file) return;
@@ -1020,7 +1116,6 @@ async function transmit() {
         if (!txSource) return;
         const elapsed = audioCtx.currentTime - startTime;
         document.getElementById('tx-progress').style.width = Math.min(100, elapsed / duration * 100) + '%';
-        drawWaveform('tx-wave');
         if (elapsed < duration) animFrame = requestAnimationFrame(update);
     }
 
@@ -1106,7 +1201,7 @@ async function startListening() {
             const totalSamples = rxChunks.reduce((s, c) => s + c.length, 0);
             const recordedTime = totalSamples / SAMPLE_RATE;
             if (recordedTime > TOTAL_DURATION + 5) {
-                finishStreamDecode();
+                stopAndDecode();
             }
         };
 
@@ -1160,10 +1255,30 @@ function stopListening() {
 function stopAndDecode() {
     stopListening();
 
-    // If we have real-time decoded lines, use those
+    // If we have real-time decoded lines, prepare for adjustment
     if (streamLineNum > 0) {
         document.getElementById('rx-status').textContent = `Decoded ${streamLineNum}/${HEIGHT} lines`;
         document.getElementById('rx-save').disabled = false;
+
+        // Prepare adjustment data from recorded audio
+        if (rxChunks.length > 0) {
+            const totalLen = rxChunks.reduce((s, c) => s + c.length, 0);
+            const combined = new Float32Array(totalLen);
+            let offset = 0;
+            for (const chunk of rxChunks) {
+                combined.set(chunk, offset);
+                offset += chunk.length;
+            }
+
+            setTimeout(() => {
+                try {
+                    decodedFreqs = demodulateFFM(combined, null);
+                    decodedImageStart = detectSignalStart(decodedFreqs);
+                } catch (e) {
+                    console.error('Adjustment prep failed:', e);
+                }
+            }, 100);
+        }
         return;
     }
 
@@ -1197,35 +1312,9 @@ function detectLeaderTone(freqData, sampleRate, fftSize) {
 function updateRxDisplay() {
     if (!isListening) return;
 
-    drawWaveform('rx-wave');
-
     if (analyser && audioCtx) {
         const freqData = new Uint8Array(analyser.frequencyBinCount);
         analyser.getByteFrequencyData(freqData);
-
-        let maxIdx = 0, maxVal = 0;
-        for (let i = 0; i < freqData.length; i++) {
-            if (freqData[i] > maxVal) {
-                maxVal = freqData[i];
-                maxIdx = i;
-            }
-        }
-        const freq = maxIdx * audioCtx.sampleRate / analyser.fftSize;
-
-        const freqDisplay = document.getElementById('freq-display');
-        freqDisplay.textContent = freq > 100 ? `${Math.round(freq)} Hz` : '-- Hz';
-        freqDisplay.classList.remove('leader', 'sync', 'data');
-
-        if (Math.abs(freq - LEADER_FREQ) < 150) {
-            freqDisplay.classList.add('leader');
-        } else if (freq > 1100 && freq < 1350) {
-            freqDisplay.classList.add('sync');
-        } else if (freq > 1400 && freq < 2400) {
-            freqDisplay.classList.add('data');
-        }
-
-        const avgLevel = freqData.reduce((a, b) => a + b, 0) / freqData.length;
-        document.getElementById('signal-bar').style.width = Math.min(100, avgLevel / 128 * 100) + '%';
 
         if (rxMode === 'auto' && !signalDetected) {
             const detection = detectLeaderTone(freqData, audioCtx.sampleRate, analyser.fftSize);
@@ -1251,20 +1340,20 @@ function updateRxDisplay() {
             }
         }
 
-        // If streaming decode is active, the status is already being updated
-        if (streamStarted && streamLineNum > 0 && streamLineNum < HEIGHT) {
-            // Status is updated by processStreamChunk
-        } else if (signalDetected || rxMode === 'manual') {
-            const totalSamples = rxChunks.reduce((s, c) => s + c.length, 0);
-            const secs = totalSamples / SAMPLE_RATE;
+        // Update status if not being updated by streaming decode
+        if (!streamStarted || streamLineNum <= 0 || streamLineNum >= HEIGHT) {
+            if (signalDetected || rxMode === 'manual') {
+                const totalSamples = rxChunks.reduce((s, c) => s + c.length, 0);
+                const secs = totalSamples / SAMPLE_RATE;
 
-            if (rxMode === 'auto' && !streamStarted) {
-                const remaining = Math.max(0, TOTAL_DURATION - secs);
-                document.getElementById('rx-status').textContent = `Recording: ${secs.toFixed(1)}s (${remaining.toFixed(1)}s remaining)`;
-                document.getElementById('rx-progress').style.width = Math.min(100, secs / TOTAL_DURATION * 100) + '%';
-            } else if (rxMode === 'manual') {
-                document.getElementById('rx-status').textContent = `Recording: ${secs.toFixed(1)}s`;
-                document.getElementById('rx-progress').style.width = Math.min(100, secs / 60 * 100) + '%';
+                if (rxMode === 'auto') {
+                    const remaining = Math.max(0, TOTAL_DURATION - secs);
+                    document.getElementById('rx-status').textContent = `Recording: ${secs.toFixed(1)}s (${remaining.toFixed(1)}s remaining)`;
+                    document.getElementById('rx-progress').style.width = Math.min(100, secs / TOTAL_DURATION * 100) + '%';
+                } else if (rxMode === 'manual') {
+                    document.getElementById('rx-status').textContent = `Recording: ${secs.toFixed(1)}s`;
+                    document.getElementById('rx-progress').style.width = Math.min(100, secs / 60 * 100) + '%';
+                }
             }
         }
     }
@@ -1364,6 +1453,8 @@ document.getElementById('audio-file').onchange = async e => {
 function clearRx() {
     rxChunks = [];
     liveLineCount = 0;
+    decodedFreqs = null;
+    decodedImageStart = 0;
 
     // Reset streaming decoder state
     streamBuffer = new Float32Array(0);
@@ -1373,6 +1464,12 @@ function clearRx() {
     streamLeaderCount = 0;
     streamImageStartIdx = 0;
     streamLastProcessed = 0;
+
+    // Reset sliders
+    document.getElementById('phase-slider').value = 0;
+    document.getElementById('skew-slider').value = 0;
+    document.getElementById('phase-value').textContent = '0';
+    document.getElementById('skew-value').textContent = '0';
 
     const canvas = document.getElementById('rx-canvas');
     const ctx = canvas.getContext('2d');
@@ -1384,7 +1481,7 @@ function clearRx() {
     document.getElementById('line-indicator').style.display = 'none';
     document.getElementById('rx-save').disabled = true;
     document.getElementById('rx-progress').style.width = '0%';
-    document.getElementById('rx-status').textContent = 'Cleared';
+    document.getElementById('rx-status').textContent = 'Click Start to listen';
 }
 
 function saveImage() {
@@ -1395,29 +1492,6 @@ function saveImage() {
     link.click();
 }
 
-function drawWaveform(canvasId) {
-    if (!analyser) return;
-    const canvas = document.getElementById(canvasId);
-    const ctx = canvas.getContext('2d');
-    canvas.width = canvas.offsetWidth * 2;
-    canvas.height = canvas.offsetHeight * 2;
-
-    const data = new Uint8Array(analyser.frequencyBinCount);
-    analyser.getByteTimeDomainData(data);
-
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.strokeStyle = '#4ecdc4';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-
-    for (let i = 0; i < data.length; i++) {
-        const x = i / data.length * canvas.width;
-        const y = data[i] / 255 * canvas.height;
-        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-}
 </script>
 </body>
 </html>
