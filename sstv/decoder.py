@@ -332,12 +332,13 @@ class Robot36Decoder:
                 y_image[lines_decoded] = y_data
 
                 # Robot36: even lines have R-Y (Cr), odd lines have B-Y (Cb)
+                # Note: Swapped assignment to correct color channel mapping
                 is_even = (lines_decoded % 2) == 0
 
                 if is_even:
-                    cr_image[lines_decoded] = color_data
-                else:
                     cb_image[lines_decoded] = color_data
+                else:
+                    cr_image[lines_decoded] = color_data
 
                 lines_decoded += 1
 
@@ -348,38 +349,38 @@ class Robot36Decoder:
         print(f"Decoded {lines_decoded} lines")
 
         # Interpolate missing color values for alternating lines
-        # Even lines have Cr, need to interpolate Cb
-        # Odd lines have Cb, need to interpolate Cr
+        # Even lines have Cb (after swap), need to interpolate Cr
+        # Odd lines have Cr (after swap), need to interpolate Cb
         for i in range(lines_decoded):
             is_even = (i % 2) == 0
 
             if is_even:
-                # Even line - has Cr, need Cb
-                # Use Cb from adjacent odd lines
-                if i > 0:
-                    cb_image[i] = cb_image[i - 1]
-                elif i + 1 < lines_decoded:
-                    cb_image[i] = cb_image[i + 1]
-            else:
-                # Odd line - has Cb, need Cr
-                # Use Cr from adjacent even lines
+                # Even line - has Cb, need Cr
+                # Use Cr from adjacent odd lines
                 if i > 0:
                     cr_image[i] = cr_image[i - 1]
                 elif i + 1 < lines_decoded:
                     cr_image[i] = cr_image[i + 1]
+            else:
+                # Odd line - has Cr, need Cb
+                # Use Cb from adjacent even lines
+                if i > 0:
+                    cb_image[i] = cb_image[i - 1]
+                elif i + 1 < lines_decoded:
+                    cb_image[i] = cb_image[i + 1]
 
         # Second pass: average interpolation where possible
         for i in range(1, lines_decoded - 1):
             is_even = (i % 2) == 0
 
             if is_even:
-                # Average Cb from lines above and below
-                cb_image[i] = ((cb_image[i - 1].astype(np.int32) +
-                                cb_image[i + 1].astype(np.int32)) // 2).astype(np.uint8)
-            else:
                 # Average Cr from lines above and below
                 cr_image[i] = ((cr_image[i - 1].astype(np.int32) +
                                 cr_image[i + 1].astype(np.int32)) // 2).astype(np.uint8)
+            else:
+                # Average Cb from lines above and below
+                cb_image[i] = ((cb_image[i - 1].astype(np.int32) +
+                                cb_image[i + 1].astype(np.int32)) // 2).astype(np.uint8)
 
         # Combine YCrCb channels
         ycrcb = np.stack([y_image, cr_image, cb_image], axis=-1)
