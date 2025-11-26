@@ -3,35 +3,46 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SSTV Robot36 - TX</title>
+    <title>SSTV Robot36 - TX | MGXS</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <nav class="nav">
-        <a href="tx.html" class="active">TX</a>
-        <a href="rx.html">RX</a>
-    </nav>
+    <header class="header">
+        <a href="https://mgxs.co" class="logo">MGXS</a>
+        <nav class="nav">
+            <a href="tx.html" class="active">TX</a>
+            <a href="rx.html">RX</a>
+        </nav>
+    </header>
 
-    <div class="section">
-        <div class="image-box clickable" onclick="document.getElementById('file-input').click()">
-            <canvas id="tx-canvas" width="320" height="240" style="display:none;"></canvas>
-            <div class="placeholder" id="tx-placeholder">Click to load image</div>
+    <main class="main">
+        <h1 class="title">SSTV TRANSMIT</h1>
+
+        <div class="section">
+            <div class="image-box clickable" onclick="document.getElementById('file-input').click()">
+                <canvas id="tx-canvas" width="320" height="240" style="display:none;"></canvas>
+                <div class="placeholder" id="tx-placeholder">Click to load image</div>
+            </div>
+
+            <input type="file" id="file-input" accept="image/*">
+
+            <div class="controls">
+                <button id="btn-transmit" disabled>Transmit</button>
+                <button id="btn-stop" disabled>Stop</button>
+                <button id="btn-save" disabled>Save Audio</button>
+            </div>
+
+            <div class="progress">
+                <div class="progress-fill" id="tx-progress"></div>
+            </div>
+
+            <div class="status" id="tx-status">Load an image to begin</div>
         </div>
+    </main>
 
-        <input type="file" id="file-input" accept="image/*">
-
-        <div class="controls">
-            <button id="btn-transmit" class="primary" disabled>Transmit</button>
-            <button id="btn-stop" disabled>Stop</button>
-            <button id="btn-save" disabled>Save Audio</button>
-        </div>
-
-        <div class="progress">
-            <div class="progress-fill" id="tx-progress"></div>
-        </div>
-
-        <div class="status" id="tx-status">Load an image to transmit</div>
-    </div>
+    <footer class="footer">
+        "I'm now much closer to the idea of achieving a true dialogue with machines than I have ever been."
+    </footer>
 
     <script src="sstv.js"></script>
     <script src="tx.js"></script>
