@@ -560,11 +560,47 @@ function adjustDecode() {
     document.getElementById('phase-value').textContent = phase;
     document.getElementById('skew-value').textContent = skew;
 
-    if (!decodedFreqs) return;
+    if (!decodedFreqs) {
+        // If we have recorded audio but haven't demodulated yet, do it now
+        if (rxChunks.length > 0 && !isListening) {
+            document.getElementById('rx-status').textContent = 'Processing audio for adjustment...';
+            var totalLen = 0;
+            for (var i = 0; i < rxChunks.length; i++) {
+                totalLen += rxChunks[i].length;
+            }
+            var combined = new Float32Array(totalLen);
+            var offset = 0;
+            for (var i = 0; i < rxChunks.length; i++) {
+                combined.set(rxChunks[i], offset);
+                offset += rxChunks[i].length;
+            }
+            try {
+                decodedFreqs = demodulateFFM(combined, null);
+                decodedImageStart = detectSignalStart(decodedFreqs);
+            } catch (e) {
+                document.getElementById('rx-status').textContent = 'Error processing audio';
+                return;
+            }
+        } else {
+            return;
+        }
+    }
 
     var canvas = document.getElementById('rx-canvas');
     if (!liveCtx) {
         liveCtx = canvas.getContext('2d');
+    }
+
+    // Initialize buffers if they don't exist
+    if (!liveYImage || !liveYImage[0]) {
+        liveYImage = [];
+        liveCrImage = [];
+        liveCbImage = [];
+        for (var y = 0; y < HEIGHT; y++) {
+            liveYImage[y] = new Uint8Array(WIDTH);
+            liveCrImage[y] = new Uint8Array(WIDTH);
+            liveCbImage[y] = new Uint8Array(WIDTH);
+        }
     }
 
     canvas.style.display = 'block';
@@ -579,7 +615,7 @@ function adjustDecode() {
     var colorPorchSamples = Math.floor(COLOR_PORCH_DURATION * SAMPLE_RATE);
     var colorSamples = Math.floor(COLOR_SCAN_DURATION * SAMPLE_RATE);
 
-    // Re-init buffers
+    // Re-init buffer values
     for (var y = 0; y < HEIGHT; y++) {
         for (var x = 0; x < WIDTH; x++) {
             liveYImage[y][x] = 128;
@@ -643,6 +679,8 @@ function adjustDecode() {
 
     interpolateColors(lineHasCr, HEIGHT);
     renderFullImage();
+
+    document.getElementById('rx-status').textContent = 'Adjusted - Phase: ' + phase + ', Skew: ' + skew;
 }
 
 function handleAudioFile(e) {
