@@ -826,7 +826,20 @@ function adjustDecode() {
     document.getElementById('phase-value').textContent = phase;
     document.getElementById('skew-value').textContent = skew;
 
-    if (!decodedFreqs) return;
+    if (!decodedFreqs) {
+        console.log('adjustDecode: no decodedFreqs yet');
+        return;
+    }
+
+    // Ensure canvas context is ready
+    if (!liveCtx) {
+        liveCanvas = document.getElementById('rx-canvas');
+        liveCtx = liveCanvas.getContext('2d');
+    }
+
+    // Ensure canvas is visible
+    liveCanvas.style.display = 'block';
+    document.getElementById('rx-placeholder').style.display = 'none';
 
     const freqs = decodedFreqs;
     const baseLineSamples = Math.floor(LINE_DURATION * SAMPLE_RATE);
@@ -1252,12 +1265,12 @@ function stopListening() {
     document.getElementById('rx-status').classList.remove('active', 'waiting');
 }
 
-function stopAndDecode() {
+async function stopAndDecode() {
     stopListening();
 
     // If we have real-time decoded lines, prepare for adjustment
     if (streamLineNum > 0) {
-        document.getElementById('rx-status').textContent = `Decoded ${streamLineNum}/${HEIGHT} lines`;
+        document.getElementById('rx-status').textContent = `Decoded ${streamLineNum}/${HEIGHT} lines - preparing adjustments...`;
         document.getElementById('rx-save').disabled = false;
 
         // Prepare adjustment data from recorded audio
@@ -1270,14 +1283,17 @@ function stopAndDecode() {
                 offset += chunk.length;
             }
 
-            setTimeout(() => {
-                try {
-                    decodedFreqs = demodulateFFM(combined, null);
-                    decodedImageStart = detectSignalStart(decodedFreqs);
-                } catch (e) {
-                    console.error('Adjustment prep failed:', e);
-                }
-            }, 100);
+            // Small delay to let UI update, then demodulate
+            await new Promise(r => setTimeout(r, 50));
+
+            try {
+                decodedFreqs = demodulateFFM(combined, null);
+                decodedImageStart = detectSignalStart(decodedFreqs);
+                document.getElementById('rx-status').textContent = `Decoded ${streamLineNum}/${HEIGHT} lines - ready for adjustment`;
+            } catch (e) {
+                console.error('Adjustment prep failed:', e);
+                document.getElementById('rx-status').textContent = `Decoded ${streamLineNum}/${HEIGHT} lines`;
+            }
         }
         return;
     }
