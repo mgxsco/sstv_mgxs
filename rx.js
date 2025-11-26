@@ -27,6 +27,7 @@ var streamImageStartIdx = 0;
 
 var decodedFreqs = null;
 var decodedImageStart = 0;
+var originalImageStart = 0;  // Store the original start position from streaming decode
 
 var LINE_SAMPLES = Math.floor(LINE_DURATION * SAMPLE_RATE);
 
@@ -345,10 +346,16 @@ function stopAndDecode() {
                 offset += rxChunks[i].length;
             }
 
+            // Save the original start position used by streaming decoder
+            // Need to account for buffer that wasn't trimmed
+            originalImageStart = streamImageStartIdx;
+
             setTimeout(function() {
                 try {
                     decodedFreqs = demodulateFFM(combined, null);
-                    decodedImageStart = detectSignalStart(decodedFreqs);
+                    // Use the streaming decoder's start position as base, not detectSignalStart
+                    // which might return a different position
+                    decodedImageStart = originalImageStart;
                     document.getElementById('rx-status').textContent = 'Decoded ' + streamLineNum + '/' + HEIGHT + ' lines - ready for adjustment';
                 } catch (e) {
                     console.error('Adjustment prep failed:', e);
@@ -576,7 +583,12 @@ function adjustDecode() {
             }
             try {
                 decodedFreqs = demodulateFFM(combined, null);
-                decodedImageStart = detectSignalStart(decodedFreqs);
+                // Use streaming decoder's start position if available, otherwise detect
+                if (originalImageStart > 0) {
+                    decodedImageStart = originalImageStart;
+                } else {
+                    decodedImageStart = detectSignalStart(decodedFreqs);
+                }
             } catch (e) {
                 document.getElementById('rx-status').textContent = 'Error processing audio';
                 return;
@@ -591,18 +603,6 @@ function adjustDecode() {
         liveCtx = canvas.getContext('2d');
     }
 
-    // Initialize buffers if they don't exist
-    if (!liveYImage || !liveYImage[0]) {
-        liveYImage = [];
-        liveCrImage = [];
-        liveCbImage = [];
-        for (var y = 0; y < HEIGHT; y++) {
-            liveYImage[y] = new Uint8Array(WIDTH);
-            liveCrImage[y] = new Uint8Array(WIDTH);
-            liveCbImage[y] = new Uint8Array(WIDTH);
-        }
-    }
-
     canvas.style.display = 'block';
     document.getElementById('rx-placeholder').style.display = 'none';
 
@@ -615,16 +615,23 @@ function adjustDecode() {
     var colorPorchSamples = Math.floor(COLOR_PORCH_DURATION * SAMPLE_RATE);
     var colorSamples = Math.floor(COLOR_SCAN_DURATION * SAMPLE_RATE);
 
-    // Re-init buffer values
+    // Work on temporary buffers to avoid erasing current image if something goes wrong
+    var tempY = [];
+    var tempCr = [];
+    var tempCb = [];
     for (var y = 0; y < HEIGHT; y++) {
+        tempY[y] = new Uint8Array(WIDTH);
+        tempCr[y] = new Uint8Array(WIDTH);
+        tempCb[y] = new Uint8Array(WIDTH);
         for (var x = 0; x < WIDTH; x++) {
-            liveYImage[y][x] = 128;
-            liveCrImage[y][x] = 128;
-            liveCbImage[y][x] = 128;
+            tempY[y][x] = 128;
+            tempCr[y][x] = 128;
+            tempCb[y][x] = 128;
         }
     }
 
     var lineHasCr = [];
+    var validLines = 0;
 
     for (var line = 0; line < HEIGHT; line++) {
         var lineSamples = baseLineSamples + skew;
@@ -635,6 +642,8 @@ function adjustDecode() {
             continue;
         }
 
+        validLines++;
+
         // Extract Y
         var yStart = lineStart + syncSamples + porchSamples;
         var yEnd = yStart + ySamples;
@@ -642,7 +651,7 @@ function adjustDecode() {
         for (var x = 0; x < WIDTH; x++) {
             var idx = yStart + Math.floor(x / WIDTH * (yEnd - yStart));
             if (idx >= 0 && idx < freqs.length) {
-                liveYImage[line][x] = freqToValue(freqs[idx]);
+                tempY[line][x] = freqToValue(freqs[idx]);
             }
         }
 
@@ -669,13 +678,24 @@ function adjustDecode() {
             if (idx >= 0 && idx < freqs.length) {
                 var val = freqToValue(freqs[idx]);
                 if (isCrLine) {
-                    liveCrImage[line][x] = val;
+                    tempCr[line][x] = val;
                 } else {
-                    liveCbImage[line][x] = val;
+                    tempCb[line][x] = val;
                 }
             }
         }
     }
+
+    // Only update live buffers if we successfully decoded some lines
+    if (validLines < 10) {
+        document.getElementById('rx-status').textContent = 'Adjustment out of range - try different values';
+        return;
+    }
+
+    // Copy temp buffers to live buffers
+    liveYImage = tempY;
+    liveCrImage = tempCr;
+    liveCbImage = tempCb;
 
     interpolateColors(lineHasCr, HEIGHT);
     renderFullImage();
@@ -738,6 +758,7 @@ function clearRx() {
     rxChunks = [];
     decodedFreqs = null;
     decodedImageStart = 0;
+    originalImageStart = 0;
 
     streamBuffer = [];
     streamLineNum = 0;
