@@ -93,6 +93,12 @@ function initStreamDecoder() {
     streamStarted = false;
     streamLeaderCount = 0;
     streamImageStartIdx = 0;
+
+    // Clear previous session's decoded data so phase/skew uses new audio
+    decodedFreqs = null;
+    decodedImageStart = 0;
+    originalImageStart = 0;
+
     initBuffers();
 }
 
