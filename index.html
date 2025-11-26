@@ -155,12 +155,12 @@ let decodedFreqs = null;
 let decodedImageStart = 0;
 
 // ============================================
-// Color Conversion
+// Color Conversion (ITU-R BT.601 full range)
 // ============================================
 function rgbToYCrCb(r, g, b) {
-    const y = 16 + 65.481 * r / 255 + 128.553 * g / 255 + 24.966 * b / 255;
-    const cr = 128 + 112.0 * r / 255 - 93.786 * g / 255 - 18.214 * b / 255;
-    const cb = 128 - 37.797 * r / 255 - 74.203 * g / 255 + 112.0 * b / 255;
+    const y  = 0.299 * r + 0.587 * g + 0.114 * b;
+    const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+    const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
     return [
         Math.max(0, Math.min(255, Math.round(y))),
         Math.max(0, Math.min(255, Math.round(cr))),
@@ -169,9 +169,9 @@ function rgbToYCrCb(r, g, b) {
 }
 
 function yCrCbToRgb(y, cr, cb) {
-    const r = 298.082 * (y - 16) / 256 + 408.583 * (cr - 128) / 256;
-    const g = 298.082 * (y - 16) / 256 - 208.120 * (cr - 128) / 256 - 100.291 * (cb - 128) / 256;
-    const b = 298.082 * (y - 16) / 256 + 516.411 * (cb - 128) / 256;
+    const r = y + 1.402 * (cr - 128);
+    const g = y - 0.344136 * (cb - 128) - 0.714136 * (cr - 128);
+    const b = y + 1.772 * (cb - 128);
     return [
         Math.max(0, Math.min(255, Math.round(r))),
         Math.max(0, Math.min(255, Math.round(g))),
