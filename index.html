@@ -89,6 +89,22 @@
         "I'm now much closer to the idea of achieving a true dialogue with machines than I have ever been."
     </footer>
 
+    <!-- Crop Modal -->
+    <div id="crop-modal" class="crop-modal">
+        <div class="crop-container">
+            <h2 class="crop-title">CROP IMAGE</h2>
+            <div class="crop-workspace">
+                <canvas id="crop-canvas"></canvas>
+                <div id="crop-selection" class="crop-selection"></div>
+            </div>
+            <div class="crop-controls">
+                <button id="btn-crop-confirm">Confirm</button>
+                <button id="btn-crop-cancel">Cancel</button>
+            </div>
+            <div class="crop-hint">Drag to move, drag corners to resize (4:3 aspect ratio locked)</div>
+        </div>
+    </div>
+
     <script src="sstv.js"></script>
     <script src="tx.js"></script>
     <script src="rx.js"></script>

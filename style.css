@@ -308,6 +308,106 @@ input[type="file"] {
     line-height: 1.6;
 }
 
+/* Crop Modal */
+.crop-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.9);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+}
+
+.crop-modal.active {
+    display: flex;
+}
+
+.crop-container {
+    background: #fff;
+    padding: 2rem;
+    max-width: 90vw;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.crop-title {
+    font-family: 'Tektur', sans-serif;
+    font-size: 1.5rem;
+    font-weight: 900;
+    background: #000;
+    color: #DFFF00;
+    padding: 0.5rem 1.5rem;
+    margin-bottom: 1.5rem;
+    letter-spacing: 2px;
+}
+
+.crop-workspace {
+    position: relative;
+    background: #0a0a0a;
+    overflow: hidden;
+    cursor: crosshair;
+}
+
+.crop-workspace canvas {
+    display: block;
+    max-width: 100%;
+    max-height: 60vh;
+}
+
+.crop-selection {
+    position: absolute;
+    border: 2px solid #DFFF00;
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.6);
+    cursor: move;
+    pointer-events: auto;
+}
+
+.crop-selection::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    border: 1px dashed rgba(255, 255, 255, 0.5);
+}
+
+/* Crop resize handles */
+.crop-handle {
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    background: #DFFF00;
+    border: 2px solid #000;
+}
+
+.crop-handle.nw { top: -8px; left: -8px; cursor: nw-resize; }
+.crop-handle.ne { top: -8px; right: -8px; cursor: ne-resize; }
+.crop-handle.sw { bottom: -8px; left: -8px; cursor: sw-resize; }
+.crop-handle.se { bottom: -8px; right: -8px; cursor: se-resize; }
+
+.crop-controls {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+}
+
+.crop-hint {
+    margin-top: 1rem;
+    font-size: 0.75rem;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
 /* Responsive */
 @media (max-width: 600px) {
     .header {
