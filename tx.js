@@ -6,6 +6,18 @@ var audioCtx = null;
 var txSource = null;
 var animFrame = null;
 
+// Initialize AudioContext on first user interaction (required for iOS)
+function initAudioContext() {
+    if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+    }
+    // Resume if suspended (iOS requirement)
+    if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+    }
+    return audioCtx;
+}
+
 // Wait for DOM to load
 document.addEventListener('DOMContentLoaded', function() {
     // File input handler
@@ -46,6 +58,15 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('btn-save').addEventListener('click', function() {
         saveAudio();
     });
+
+    // iOS audio unlock - touch anywhere to init audio context
+    document.body.addEventListener('touchstart', function() {
+        initAudioContext();
+    }, { once: true });
+
+    document.body.addEventListener('click', function() {
+        initAudioContext();
+    }, { once: true });
 });
 
 function transmit() {
@@ -53,29 +74,31 @@ function transmit() {
     document.getElementById('btn-transmit').disabled = true;
     document.getElementById('btn-save').disabled = true;
 
+    // Initialize/resume audio context first
+    var ctx = initAudioContext();
+
     setTimeout(function() {
         var canvas = document.getElementById('tx-canvas');
-        var ctx = canvas.getContext('2d');
-        var imageData = ctx.getImageData(0, 0, WIDTH, HEIGHT);
+        var canvasCtx = canvas.getContext('2d');
+        var imageData = canvasCtx.getImageData(0, 0, WIDTH, HEIGHT);
         var audio = encodeSSTV(imageData);
 
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
-        var buffer = audioCtx.createBuffer(1, audio.length, SAMPLE_RATE);
+        var buffer = ctx.createBuffer(1, audio.length, SAMPLE_RATE);
         buffer.getChannelData(0).set(audio);
 
-        txSource = audioCtx.createBufferSource();
+        txSource = ctx.createBufferSource();
         txSource.buffer = buffer;
-        txSource.connect(audioCtx.destination);
+        txSource.connect(ctx.destination);
 
         document.getElementById('btn-stop').disabled = false;
         document.getElementById('tx-status').textContent = 'Transmitting...';
 
-        var startTime = audioCtx.currentTime;
+        var startTime = ctx.currentTime;
         var duration = buffer.duration;
 
         function updateProgress() {
             if (!txSource) return;
-            var elapsed = audioCtx.currentTime - startTime;
+            var elapsed = ctx.currentTime - startTime;
             var pct = Math.min(100, elapsed / duration * 100);
             document.getElementById('tx-progress').style.width = pct + '%';
             if (elapsed < duration) {
