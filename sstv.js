@@ -1,40 +1,40 @@
 /**
- * SSTV Robot36 - Core Library
+ * SSTV Robot36 - Core Library (Improved Decoder)
  */
 
 // ============================================
 // Constants
 // ============================================
-const SAMPLE_RATE = 44100;
-const WIDTH = 320;
-const HEIGHT = 240;
+var SAMPLE_RATE = 44100;
+var WIDTH = 320;
+var HEIGHT = 240;
 
 // Frequencies (Hz)
-const FREQ_BLACK = 1500;
-const FREQ_WHITE = 2300;
-const FREQ_SYNC = 1200;
-const FREQ_VIS_1 = 1100;
-const FREQ_VIS_0 = 1300;
-const LEADER_FREQ = 1900;
-const VIS_CODE = 8;
+var FREQ_BLACK = 1500;
+var FREQ_WHITE = 2300;
+var FREQ_SYNC = 1200;
+var FREQ_VIS_1 = 1100;
+var FREQ_VIS_0 = 1300;
+var LEADER_FREQ = 1900;
+var VIS_CODE = 8;
 
 // Timing (seconds)
-const LEADER_DURATION = 0.300;
-const BREAK_DURATION = 0.010;
-const VIS_BIT_DURATION = 0.030;
-const SYNC_DURATION = 0.009;
-const SYNC_PORCH_DURATION = 0.003;
-const Y_SCAN_DURATION = 0.088;
-const SEPARATOR_DURATION = 0.0045;
-const COLOR_PORCH_DURATION = 0.0015;
-const COLOR_SCAN_DURATION = 0.044;
+var LEADER_DURATION = 0.300;
+var BREAK_DURATION = 0.010;
+var VIS_BIT_DURATION = 0.030;
+var SYNC_DURATION = 0.009;
+var SYNC_PORCH_DURATION = 0.003;
+var Y_SCAN_DURATION = 0.088;
+var SEPARATOR_DURATION = 0.0045;
+var COLOR_PORCH_DURATION = 0.0015;
+var COLOR_SCAN_DURATION = 0.044;
 
-const LINE_DURATION = SYNC_DURATION + SYNC_PORCH_DURATION + Y_SCAN_DURATION +
-                      SEPARATOR_DURATION + COLOR_PORCH_DURATION + COLOR_SCAN_DURATION;
-const TOTAL_DURATION = LINE_DURATION * HEIGHT + 0.7;
+var LINE_DURATION = SYNC_DURATION + SYNC_PORCH_DURATION + Y_SCAN_DURATION +
+                    SEPARATOR_DURATION + COLOR_PORCH_DURATION + COLOR_SCAN_DURATION;
+var TOTAL_DURATION = LINE_DURATION * HEIGHT + 0.7;
 
 // ============================================
-// Color Conversion
+// Color Conversion (ITU-R BT.601 Full Range)
 // ============================================
 function rgbToYCrCb(r, g, b) {
     var y  = 0.299 * r + 0.587 * g + 0.114 * b;
@@ -138,7 +138,6 @@ function encodeSSTV(imageData) {
         addFM(isEven ? ycrcb[line].cr : ycrcb[line].cb, COLOR_SCAN_DURATION);
     }
 
-    // Convert to Float32Array
     var audio = new Float32Array(samples.length);
     for (var i = 0; i < samples.length; i++) {
         audio[i] = samples[i] * 0.9;
@@ -160,12 +159,9 @@ function createWavFile(samples, sampleRate) {
     var buffer = new ArrayBuffer(fileSize);
     var view = new DataView(buffer);
 
-    // RIFF header
     writeString(view, 0, 'RIFF');
     view.setUint32(4, fileSize - 8, true);
     writeString(view, 8, 'WAVE');
-
-    // fmt chunk
     writeString(view, 12, 'fmt ');
     view.setUint32(16, 16, true);
     view.setUint16(20, 1, true);
@@ -174,12 +170,9 @@ function createWavFile(samples, sampleRate) {
     view.setUint32(28, byteRate, true);
     view.setUint16(32, blockAlign, true);
     view.setUint16(34, bitsPerSample, true);
-
-    // data chunk
     writeString(view, 36, 'data');
     view.setUint32(40, dataSize, true);
 
-    // Write samples
     var offset = 44;
     for (var i = 0; i < samples.length; i++) {
         var sample = Math.max(-1, Math.min(1, samples[i]));
@@ -198,14 +191,29 @@ function writeString(view, offset, string) {
 }
 
 // ============================================
-// DSP Functions
+// Improved DSP Functions
 // ============================================
-function simpleBandpass(signal, lowFreq, highFreq) {
-    var n = 101;
+
+// Blackman-Harris window for better sidelobe suppression
+function blackmanHarrisWindow(n) {
+    var w = new Float32Array(n);
+    var a0 = 0.35875, a1 = 0.48829, a2 = 0.14128, a3 = 0.01168;
+    for (var i = 0; i < n; i++) {
+        var x = 2 * Math.PI * i / (n - 1);
+        w[i] = a0 - a1 * Math.cos(x) + a2 * Math.cos(2 * x) - a3 * Math.cos(3 * x);
+    }
+    return w;
+}
+
+// Improved bandpass filter with steeper rolloff
+function bandpassFilter(signal, lowFreq, highFreq) {
+    var n = 151;  // More taps for sharper cutoff
     var h = new Float32Array(n);
     var fc1 = lowFreq / SAMPLE_RATE;
     var fc2 = highFreq / SAMPLE_RATE;
+    var window = blackmanHarrisWindow(n);
 
+    var sum = 0;
     for (var i = 0; i < n; i++) {
         var x = i - (n - 1) / 2;
         if (x === 0) {
@@ -213,29 +221,25 @@ function simpleBandpass(signal, lowFreq, highFreq) {
         } else {
             h[i] = (Math.sin(2 * Math.PI * fc2 * x) - Math.sin(2 * Math.PI * fc1 * x)) / (Math.PI * x);
         }
-        h[i] *= 0.54 - 0.46 * Math.cos(2 * Math.PI * i / (n - 1));
+        h[i] *= window[i];
+        sum += h[i];
+    }
+    // Normalize
+    for (var i = 0; i < n; i++) {
+        h[i] /= sum;
     }
 
-    var filtered = new Float32Array(signal.length);
-    var halfN = Math.floor(n / 2);
-    for (var i = 0; i < signal.length; i++) {
-        var sum = 0;
-        for (var j = 0; j < n; j++) {
-            var idx = i - halfN + j;
-            if (idx >= 0 && idx < signal.length) {
-                sum += signal[idx] * h[j];
-            }
-        }
-        filtered[i] = sum;
-    }
-    return filtered;
+    return convolve(signal, h);
 }
 
-function lowpassFilter(signal, cutoff) {
-    var n = 51;
+// Lowpass filter with configurable order
+function lowpassFilter(signal, cutoff, order) {
+    var n = order || 71;
     var h = new Float32Array(n);
     var fc = cutoff / SAMPLE_RATE;
+    var window = blackmanHarrisWindow(n);
 
+    var sum = 0;
     for (var i = 0; i < n; i++) {
         var x = i - (n - 1) / 2;
         if (x === 0) {
@@ -243,17 +247,27 @@ function lowpassFilter(signal, cutoff) {
         } else {
             h[i] = Math.sin(2 * Math.PI * fc * x) / (Math.PI * x);
         }
-        h[i] *= 0.54 - 0.46 * Math.cos(2 * Math.PI * i / (n - 1));
+        h[i] *= window[i];
+        sum += h[i];
+    }
+    for (var i = 0; i < n; i++) {
+        h[i] /= sum;
     }
 
+    return convolve(signal, h);
+}
+
+// Optimized convolution
+function convolve(signal, kernel) {
     var filtered = new Float32Array(signal.length);
-    var halfN = Math.floor(n / 2);
+    var halfN = Math.floor(kernel.length / 2);
+
     for (var i = 0; i < signal.length; i++) {
         var sum = 0;
-        for (var j = 0; j < n; j++) {
+        for (var j = 0; j < kernel.length; j++) {
             var idx = i - halfN + j;
             if (idx >= 0 && idx < signal.length) {
-                sum += signal[idx] * h[j];
+                sum += signal[idx] * kernel[j];
             }
         }
         filtered[i] = sum;
@@ -261,6 +275,29 @@ function lowpassFilter(signal, cutoff) {
     return filtered;
 }
 
+// Median filter for spike removal
+function medianFilter(signal, windowSize) {
+    var filtered = new Float32Array(signal.length);
+    var half = Math.floor(windowSize / 2);
+    var window = new Float32Array(windowSize);
+
+    for (var i = 0; i < signal.length; i++) {
+        var count = 0;
+        for (var j = -half; j <= half; j++) {
+            var idx = i + j;
+            if (idx >= 0 && idx < signal.length) {
+                window[count++] = signal[idx];
+            }
+        }
+        // Sort window values
+        var slice = window.subarray(0, count);
+        slice.sort();
+        filtered[i] = slice[Math.floor(count / 2)];
+    }
+    return filtered;
+}
+
+// FFT implementation
 function fft(real, imag) {
     var n = real.length;
     if (n <= 1) return;
@@ -268,18 +305,12 @@ function fft(real, imag) {
     var j = 0;
     for (var i = 0; i < n - 1; i++) {
         if (i < j) {
-            var tempR = real[i];
-            var tempI = imag[i];
-            real[i] = real[j];
-            imag[i] = imag[j];
-            real[j] = tempR;
-            imag[j] = tempI;
+            var tempR = real[i], tempI = imag[i];
+            real[i] = real[j]; imag[i] = imag[j];
+            real[j] = tempR; imag[j] = tempI;
         }
         var k = n / 2;
-        while (k <= j) {
-            j -= k;
-            k /= 2;
-        }
+        while (k <= j) { j -= k; k /= 2; }
         j += k;
     }
 
@@ -303,9 +334,7 @@ function fft(real, imag) {
 
 function ifft(real, imag) {
     var n = real.length;
-    for (var i = 0; i < n; i++) {
-        imag[i] = -imag[i];
-    }
+    for (var i = 0; i < n; i++) imag[i] = -imag[i];
     fft(real, imag);
     for (var i = 0; i < n; i++) {
         real[i] /= n;
@@ -313,6 +342,7 @@ function ifft(real, imag) {
     }
 }
 
+// Hilbert transform for analytic signal
 function hilbert(signal) {
     var n = signal.length;
     var fftSize = 1;
@@ -320,12 +350,13 @@ function hilbert(signal) {
 
     var real = new Float32Array(fftSize);
     var imag = new Float32Array(fftSize);
-    for (var i = 0; i < n; i++) {
-        real[i] = signal[i];
-    }
+    for (var i = 0; i < n; i++) real[i] = signal[i];
 
     fft(real, imag);
 
+    // Create analytic signal
+    real[0] = real[0];
+    imag[0] = imag[0];
     for (var i = 1; i < fftSize / 2; i++) {
         real[i] *= 2;
         imag[i] *= 2;
@@ -344,16 +375,18 @@ function hilbert(signal) {
 }
 
 // ============================================
-// FM Demodulation
+// Improved FM Demodulation
 // ============================================
 function demodulateFFM(signal, onProgress) {
-    if (onProgress) onProgress('Filtering signal...');
-    var filtered = simpleBandpass(signal, 900, 2500);
+    if (onProgress) onProgress('Bandpass filtering...');
 
-    if (onProgress) onProgress('Computing FM demodulation...');
+    // Tighter bandpass for SSTV frequencies
+    var filtered = bandpassFilter(signal, 1000, 2500);
+
+    if (onProgress) onProgress('Computing analytic signal...');
     var analytic = hilbert(filtered);
 
-    if (onProgress) onProgress('Extracting frequencies...');
+    if (onProgress) onProgress('Phase demodulation...');
     var freqs = new Float32Array(signal.length);
     var prevPhase = 0;
 
@@ -361,50 +394,82 @@ function demodulateFFM(signal, onProgress) {
         var phase = Math.atan2(analytic.imag[i], analytic.real[i]);
         var phaseDiff = phase - prevPhase;
 
+        // Phase unwrapping
         while (phaseDiff > Math.PI) phaseDiff -= 2 * Math.PI;
         while (phaseDiff < -Math.PI) phaseDiff += 2 * Math.PI;
 
-        freqs[i] = Math.abs(phaseDiff * SAMPLE_RATE / (2 * Math.PI));
+        // Convert phase difference to frequency
+        freqs[i] = phaseDiff * SAMPLE_RATE / (2 * Math.PI);
+        if (freqs[i] < 0) freqs[i] = -freqs[i];  // Handle negative frequencies
         prevPhase = phase;
     }
 
-    if (onProgress) onProgress('Smoothing...');
-    var smoothed = lowpassFilter(freqs, 1200);
+    if (onProgress) onProgress('Removing noise spikes...');
+    // Median filter to remove impulse noise
+    freqs = medianFilter(freqs, 5);
 
-    for (var i = 0; i < smoothed.length; i++) {
-        smoothed[i] = Math.max(1000, Math.min(2500, smoothed[i]));
+    if (onProgress) onProgress('Smoothing frequencies...');
+    // Adaptive lowpass based on pixel rate
+    var pixelRate = WIDTH / Y_SCAN_DURATION;  // ~3636 pixels/sec
+    freqs = lowpassFilter(freqs, pixelRate * 1.5, 91);
+
+    // Clamp to valid SSTV range
+    for (var i = 0; i < freqs.length; i++) {
+        freqs[i] = Math.max(1100, Math.min(2400, freqs[i]));
     }
 
-    return smoothed;
+    return freqs;
 }
 
+// Real-time demodulation with improved zero-crossing detection
 function demodulateRealtime(signal, startIdx, endIdx) {
-    var freqs = new Float32Array(endIdx - startIdx);
+    var len = endIdx - startIdx;
+    var freqs = new Float32Array(len);
+
+    // Use both zero crossings for better accuracy
+    var zeroCrossings = [];
     var prevSample = signal[startIdx];
-    var lastZeroCross = startIdx;
-    var currentFreq = 1900;
 
     for (var i = startIdx + 1; i < endIdx; i++) {
         var sample = signal[i];
-        if (prevSample <= 0 && sample > 0) {
-            var period = i - lastZeroCross;
-            if (period > 0) {
-                currentFreq = SAMPLE_RATE / period;
-                currentFreq = Math.max(1000, Math.min(2500, currentFreq));
-            }
-            lastZeroCross = i;
+        // Detect both rising and falling edges
+        if ((prevSample <= 0 && sample > 0) || (prevSample >= 0 && sample < 0)) {
+            // Linear interpolation for sub-sample accuracy
+            var frac = -prevSample / (sample - prevSample);
+            zeroCrossings.push(i - 1 + frac);
         }
-        freqs[i - startIdx] = currentFreq;
         prevSample = sample;
     }
 
-    // Smoothing
-    var smoothed = new Float32Array(freqs.length);
-    var windowSize = 15;
-    for (var i = 0; i < freqs.length; i++) {
-        var sum = 0;
-        var count = 0;
-        for (var j = Math.max(0, i - windowSize); j <= Math.min(freqs.length - 1, i + windowSize); j++) {
+    // Calculate frequency from half-periods
+    var currentFreq = 1900;
+    var crossIdx = 0;
+
+    for (var i = 0; i < len; i++) {
+        var samplePos = startIdx + i;
+
+        // Find surrounding zero crossings
+        while (crossIdx < zeroCrossings.length - 1 && zeroCrossings[crossIdx + 1] < samplePos) {
+            crossIdx++;
+        }
+
+        if (crossIdx < zeroCrossings.length - 1) {
+            var halfPeriod = zeroCrossings[crossIdx + 1] - zeroCrossings[crossIdx];
+            if (halfPeriod > 0) {
+                currentFreq = SAMPLE_RATE / (2 * halfPeriod);
+                currentFreq = Math.max(1100, Math.min(2400, currentFreq));
+            }
+        }
+
+        freqs[i] = currentFreq;
+    }
+
+    // Light smoothing
+    var smoothed = new Float32Array(len);
+    var windowSize = 11;
+    for (var i = 0; i < len; i++) {
+        var sum = 0, count = 0;
+        for (var j = Math.max(0, i - windowSize); j <= Math.min(len - 1, i + windowSize); j++) {
             sum += freqs[j];
             count++;
         }
@@ -415,7 +480,7 @@ function demodulateRealtime(signal, startIdx, endIdx) {
 }
 
 // ============================================
-// Line Decoder
+// Improved Line Decoder with Averaging
 // ============================================
 function decodeSingleLine(freqs, lineOffset) {
     var syncSamples = Math.floor(SYNC_DURATION * SAMPLE_RATE);
@@ -428,41 +493,68 @@ function decodeSingleLine(freqs, lineOffset) {
     var yData = new Uint8Array(WIDTH);
     var colorData = new Uint8Array(WIDTH);
 
-    // Extract Y
+    // Calculate samples per pixel for averaging
+    var ySamplesPerPixel = ySamples / WIDTH;
+    var colorSamplesPerPixel = colorSamples / WIDTH;
+
+    // Extract Y with sample averaging
     var yStart = lineOffset + syncSamples + porchSamples;
-    var yEnd = yStart + ySamples;
 
     for (var x = 0; x < WIDTH; x++) {
-        var idx = yStart + Math.floor(x / WIDTH * (yEnd - yStart));
-        if (idx >= 0 && idx < freqs.length) {
-            yData[x] = freqToValue(freqs[idx]);
+        var pixelStart = yStart + Math.floor(x * ySamplesPerPixel);
+        var pixelEnd = yStart + Math.floor((x + 1) * ySamplesPerPixel);
+
+        var sum = 0, count = 0;
+        for (var s = pixelStart; s < pixelEnd && s < freqs.length; s++) {
+            if (s >= 0) {
+                sum += freqs[s];
+                count++;
+            }
+        }
+
+        if (count > 0) {
+            yData[x] = freqToValue(sum / count);
         } else {
             yData[x] = 128;
         }
     }
 
-    // Detect separator
-    var sepStart = yEnd;
-    var sepFreqSum = 0;
-    var sepCount = 0;
-    for (var s = 0; s < sepSamples; s++) {
-        var idx = sepStart + s;
-        if (idx >= 0 && idx < freqs.length) {
-            sepFreqSum += freqs[idx];
+    // Detect separator tone with averaging
+    var sepStart = yStart + ySamples;
+    var sepFreqSum = 0, sepCount = 0;
+
+    // Sample middle portion of separator for more accuracy
+    var sepMidStart = sepStart + Math.floor(sepSamples * 0.2);
+    var sepMidEnd = sepStart + Math.floor(sepSamples * 0.8);
+
+    for (var s = sepMidStart; s < sepMidEnd && s < freqs.length; s++) {
+        if (s >= 0) {
+            sepFreqSum += freqs[s];
             sepCount++;
         }
     }
-    var avgSepFreq = sepCount > 0 ? sepFreqSum / sepCount : 1900;
-    var isCrLine = avgSepFreq < 1900;
 
-    // Extract color
+    var avgSepFreq = sepCount > 0 ? sepFreqSum / sepCount : 1900;
+    // Use threshold with hysteresis
+    var isCrLine = avgSepFreq < 1850;  // Below 1850 = black separator = Cr line
+
+    // Extract color channel with sample averaging
     var colorStart = sepStart + sepSamples + colorPorchSamples;
-    var colorEnd = colorStart + colorSamples;
 
     for (var x = 0; x < WIDTH; x++) {
-        var idx = colorStart + Math.floor(x / WIDTH * (colorEnd - colorStart));
-        if (idx >= 0 && idx < freqs.length) {
-            colorData[x] = freqToValue(freqs[idx]);
+        var pixelStart = colorStart + Math.floor(x * colorSamplesPerPixel);
+        var pixelEnd = colorStart + Math.floor((x + 1) * colorSamplesPerPixel);
+
+        var sum = 0, count = 0;
+        for (var s = pixelStart; s < pixelEnd && s < freqs.length; s++) {
+            if (s >= 0) {
+                sum += freqs[s];
+                count++;
+            }
+        }
+
+        if (count > 0) {
+            colorData[x] = freqToValue(sum / count);
         } else {
             colorData[x] = 128;
         }
@@ -472,94 +564,221 @@ function decodeSingleLine(freqs, lineOffset) {
 }
 
 // ============================================
-// Signal Detection
+// Improved Signal Detection
 // ============================================
+
+// Correlation-based sync pulse detection
 function findSyncPulses(freqs) {
     var pulses = [];
-    var minSamples = Math.floor(0.005 * SAMPLE_RATE);
-    var maxSamples = Math.floor(0.020 * SAMPLE_RATE);
+    var syncSamples = Math.floor(SYNC_DURATION * SAMPLE_RATE);
+    var minSamples = Math.floor(0.006 * SAMPLE_RATE);
+    var maxSamples = Math.floor(0.015 * SAMPLE_RATE);
+
+    // Create sync pulse template
+    var templateLen = syncSamples;
+    var template = new Float32Array(templateLen);
+    for (var i = 0; i < templateLen; i++) {
+        template[i] = FREQ_SYNC;
+    }
+
     var inSync = false;
     var syncStart = 0;
+    var syncStrength = 0;
+
+    // Adaptive threshold based on signal statistics
+    var freqMean = 0, freqStd = 0;
+    var sampleCount = Math.min(freqs.length, 50000);
+    for (var i = 0; i < sampleCount; i++) {
+        freqMean += freqs[i];
+    }
+    freqMean /= sampleCount;
+
+    for (var i = 0; i < sampleCount; i++) {
+        freqStd += (freqs[i] - freqMean) * (freqs[i] - freqMean);
+    }
+    freqStd = Math.sqrt(freqStd / sampleCount);
+
+    // Sync threshold: below mean by some amount
+    var syncThresholdHigh = Math.min(1450, freqMean - freqStd * 0.5);
+    var syncThresholdLow = 1100;
 
     for (var i = 0; i < freqs.length; i++) {
-        var isSync = freqs[i] < 1400 && freqs[i] > 1050;
+        var isSync = freqs[i] < syncThresholdHigh && freqs[i] > syncThresholdLow;
+
         if (isSync && !inSync) {
             inSync = true;
             syncStart = i;
+            syncStrength = 0;
+        } else if (isSync && inSync) {
+            syncStrength += (syncThresholdHigh - freqs[i]);
         } else if (!isSync && inSync) {
             inSync = false;
             var duration = i - syncStart;
+
             if (duration >= minSamples && duration <= maxSamples) {
-                pulses.push(syncStart);
+                // Score based on duration match and strength
+                var durationScore = 1 - Math.abs(duration - syncSamples) / syncSamples;
+                if (durationScore > 0.5) {
+                    pulses.push({
+                        pos: syncStart,
+                        duration: duration,
+                        score: durationScore * syncStrength
+                    });
+                }
             }
         }
     }
-    return pulses;
+
+    // Return positions sorted by score, then position
+    pulses.sort(function(a, b) { return a.pos - b.pos; });
+
+    return pulses.map(function(p) { return p.pos; });
 }
 
+// Filter sync pulses to find regular line intervals
 function findRegularSyncs(pulses) {
     if (pulses.length < 3) return pulses;
 
     var expectedInterval = Math.floor(LINE_DURATION * SAMPLE_RATE);
-    var filtered = [pulses[0]];
+    var tolerance = 0.15;  // 15% tolerance
 
-    for (var i = 1; i < pulses.length; i++) {
-        var dist = pulses[i] - filtered[filtered.length - 1];
-        var ratio = dist / expectedInterval;
-        if ((ratio > 0.7 && ratio < 1.3) || (ratio > 1.7 && ratio < 2.3)) {
-            filtered.push(pulses[i]);
-        }
-    }
-    return filtered;
-}
+    // Find the best starting pulse using voting
+    var votes = new Array(pulses.length).fill(0);
 
-function detectSignalStart(freqs) {
-    var windowSamples = Math.floor(0.02 * SAMPLE_RATE);
+    for (var i = 0; i < pulses.length; i++) {
+        for (var j = i + 1; j < pulses.length; j++) {
+            var dist = pulses[j] - pulses[i];
+            var lines = Math.round(dist / expectedInterval);
 
-    for (var i = 0; i < freqs.length - windowSamples; i += Math.floor(windowSamples / 4)) {
-        var leaderCount = 0;
-        var sstvCount = 0;
+            if (lines > 0 && lines <= HEIGHT) {
+                var expectedDist = lines * expectedInterval;
+                var error = Math.abs(dist - expectedDist) / expectedDist;
 
-        for (var j = 0; j < windowSamples; j++) {
-            if (Math.abs(freqs[i + j] - LEADER_FREQ) < 200) leaderCount++;
-            if (freqs[i + j] > 1100 && freqs[i + j] < 2400) sstvCount++;
-        }
-
-        if (leaderCount / windowSamples > 0.5) {
-            for (var k = i + windowSamples; k < freqs.length; k++) {
-                if (freqs[k] < 1400) {
-                    var headerDuration = BREAK_DURATION + 10 * VIS_BIT_DURATION + BREAK_DURATION;
-                    return Math.min(k + Math.floor(headerDuration * SAMPLE_RATE), freqs.length - 1);
+                if (error < tolerance) {
+                    votes[i]++;
+                    votes[j]++;
                 }
             }
         }
+    }
 
-        if (freqs[i] < 1300 && freqs[i] > 1100 && sstvCount / windowSamples > 0.7) {
-            return Math.max(0, i - Math.floor(0.01 * SAMPLE_RATE));
+    // Find pulse with most votes
+    var bestIdx = 0;
+    for (var i = 1; i < votes.length; i++) {
+        if (votes[i] > votes[bestIdx]) bestIdx = i;
+    }
+
+    // Build sequence from best starting point
+    var filtered = [pulses[bestIdx]];
+    var lastPos = pulses[bestIdx];
+
+    for (var i = bestIdx + 1; i < pulses.length; i++) {
+        var dist = pulses[i] - lastPos;
+        var lines = Math.round(dist / expectedInterval);
+
+        if (lines >= 1 && lines <= 3) {
+            var expectedDist = lines * expectedInterval;
+            var error = Math.abs(dist - expectedDist) / expectedDist;
+
+            if (error < tolerance) {
+                // Fill in missing lines if needed
+                for (var l = 1; l < lines; l++) {
+                    filtered.push(lastPos + l * expectedInterval);
+                }
+                filtered.push(pulses[i]);
+                lastPos = pulses[i];
+            }
+        }
+    }
+
+    return filtered;
+}
+
+// Improved signal start detection with VIS code recognition
+function detectSignalStart(freqs) {
+    var windowSamples = Math.floor(0.05 * SAMPLE_RATE);  // 50ms window
+    var stepSamples = Math.floor(0.01 * SAMPLE_RATE);    // 10ms step
+
+    // Look for leader tone (1900 Hz)
+    for (var i = 0; i < freqs.length - windowSamples; i += stepSamples) {
+        var leaderCount = 0;
+
+        for (var j = 0; j < windowSamples; j++) {
+            if (Math.abs(freqs[i + j] - LEADER_FREQ) < 150) {
+                leaderCount++;
+            }
+        }
+
+        // Found leader tone (>60% of window)
+        if (leaderCount / windowSamples > 0.6) {
+            // Look for break + VIS code
+            var breakStart = i + windowSamples;
+
+            for (var k = breakStart; k < Math.min(breakStart + SAMPLE_RATE, freqs.length); k++) {
+                // Found sync/break tone
+                if (freqs[k] < 1300 && freqs[k] > 1100) {
+                    // Skip VIS code duration
+                    var visDuration = BREAK_DURATION + 10 * VIS_BIT_DURATION + BREAK_DURATION;
+                    var imageStart = k + Math.floor(visDuration * SAMPLE_RATE);
+
+                    // Verify we found actual image data
+                    if (imageStart < freqs.length) {
+                        var checkStart = imageStart;
+                        var validCount = 0;
+                        for (var c = 0; c < 1000 && checkStart + c < freqs.length; c++) {
+                            if (freqs[checkStart + c] > 1100 && freqs[checkStart + c] < 2400) {
+                                validCount++;
+                            }
+                        }
+                        if (validCount > 800) {
+                            return imageStart;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback: look for first sync pulse
+    var syncSamples = Math.floor(SYNC_DURATION * SAMPLE_RATE);
+    for (var i = 0; i < freqs.length - syncSamples; i++) {
+        var syncCount = 0;
+        for (var j = 0; j < syncSamples; j++) {
+            if (freqs[i + j] > 1150 && freqs[i + j] < 1350) {
+                syncCount++;
+            }
+        }
+        if (syncCount > syncSamples * 0.7) {
+            return i;
         }
     }
 
     return 0;
 }
 
+// Leader tone detection for real-time monitoring
 function detectLeaderTone(freqData, sampleRate, fftSize) {
     var binWidth = sampleRate / fftSize;
     var leaderBin = Math.round(LEADER_FREQ / binWidth);
-    var tolerance = Math.round(150 / binWidth);
+    var tolerance = Math.round(200 / binWidth);
 
     var maxVal = 0;
     var maxBin = 0;
+    var totalEnergy = 0;
 
     for (var i = Math.max(0, leaderBin - tolerance); i < Math.min(freqData.length, leaderBin + tolerance); i++) {
         if (freqData[i] > maxVal) {
             maxVal = freqData[i];
             maxBin = i;
         }
+        totalEnergy += freqData[i];
     }
 
     var peakFreq = maxBin * binWidth;
+    var isLeader = Math.abs(peakFreq - LEADER_FREQ) < 150 && maxVal > 80 && maxVal > totalEnergy * 0.3;
+
     return {
-        isLeader: Math.abs(peakFreq - LEADER_FREQ) < 150 && maxVal > 100,
+        isLeader: isLeader,
         freq: peakFreq,
         strength: maxVal
     };
