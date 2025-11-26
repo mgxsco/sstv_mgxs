@@ -1,127 +1,102 @@
 /**
- * SSTV Robot36 - Transmitter UI
+ * SSTV Robot36 - Transmitter
  */
 
-let audioCtx = null;
-let txSource = null;
-let analyser = null;
-let animFrame = null;
+var audioCtx = null;
+var txSource = null;
+var animFrame = null;
 
-// DOM elements
-const elements = {
-    canvas: null,
-    placeholder: null,
-    fileInput: null,
-    btnTransmit: null,
-    btnStop: null,
-    btnSave: null,
-    progress: null,
-    status: null
-};
-
-/**
- * Initialize the TX page
- */
-function init() {
-    elements.canvas = document.getElementById('tx-canvas');
-    elements.placeholder = document.getElementById('tx-placeholder');
-    elements.fileInput = document.getElementById('file-input');
-    elements.btnTransmit = document.getElementById('btn-transmit');
-    elements.btnStop = document.getElementById('btn-stop');
-    elements.btnSave = document.getElementById('btn-save');
-    elements.progress = document.getElementById('tx-progress');
-    elements.status = document.getElementById('tx-status');
-
+// Wait for DOM to load
+document.addEventListener('DOMContentLoaded', function() {
     // File input handler
-    elements.fileInput.addEventListener('change', handleFileSelect);
+    document.getElementById('file-input').addEventListener('change', function(e) {
+        var file = e.target.files[0];
+        if (!file) return;
 
-    // Button handlers
-    elements.btnTransmit.addEventListener('click', transmit);
-    elements.btnStop.addEventListener('click', stopTransmit);
-    elements.btnSave.addEventListener('click', saveAudio);
-}
+        var img = new Image();
+        img.onload = function() {
+            var canvas = document.getElementById('tx-canvas');
+            var ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, WIDTH, HEIGHT);
+            canvas.style.display = 'block';
+            document.getElementById('tx-placeholder').style.display = 'none';
+            document.getElementById('btn-transmit').disabled = false;
+            document.getElementById('btn-save').disabled = false;
+            document.getElementById('tx-status').textContent = 'Ready to transmit or save';
+            URL.revokeObjectURL(img.src);
+        };
+        img.onerror = function() {
+            document.getElementById('tx-status').textContent = 'Error loading image';
+            URL.revokeObjectURL(img.src);
+        };
+        img.src = URL.createObjectURL(file);
+    });
 
-/**
- * Handle image file selection
- */
-function handleFileSelect(e) {
-    const file = e.target.files[0];
-    if (!file) return;
+    // Transmit button
+    document.getElementById('btn-transmit').addEventListener('click', function() {
+        transmit();
+    });
 
-    const img = new Image();
-    img.onload = () => {
-        const ctx = elements.canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, WIDTH, HEIGHT);
-        elements.canvas.style.display = 'block';
-        elements.placeholder.style.display = 'none';
-        elements.btnTransmit.disabled = false;
-        elements.btnSave.disabled = false;
-        elements.status.textContent = 'Ready to transmit or save';
-        URL.revokeObjectURL(img.src);
-    };
-    img.onerror = () => {
-        elements.status.textContent = 'Error loading image';
-        URL.revokeObjectURL(img.src);
-    };
-    img.src = URL.createObjectURL(file);
-}
+    // Stop button
+    document.getElementById('btn-stop').addEventListener('click', function() {
+        stopTransmit();
+    });
 
-/**
- * Transmit SSTV audio
- */
-async function transmit() {
-    elements.status.textContent = 'Encoding...';
-    elements.btnTransmit.disabled = true;
-    elements.btnSave.disabled = true;
+    // Save button
+    document.getElementById('btn-save').addEventListener('click', function() {
+        saveAudio();
+    });
+});
 
-    await new Promise(r => setTimeout(r, 50));
+function transmit() {
+    document.getElementById('tx-status').textContent = 'Encoding...';
+    document.getElementById('btn-transmit').disabled = true;
+    document.getElementById('btn-save').disabled = true;
 
-    const ctx = elements.canvas.getContext('2d');
-    const imageData = ctx.getImageData(0, 0, WIDTH, HEIGHT);
-    const audio = encodeSSTV(imageData);
+    setTimeout(function() {
+        var canvas = document.getElementById('tx-canvas');
+        var ctx = canvas.getContext('2d');
+        var imageData = ctx.getImageData(0, 0, WIDTH, HEIGHT);
+        var audio = encodeSSTV(imageData);
 
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
-    const buffer = audioCtx.createBuffer(1, audio.length, SAMPLE_RATE);
-    buffer.getChannelData(0).set(audio);
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+        var buffer = audioCtx.createBuffer(1, audio.length, SAMPLE_RATE);
+        buffer.getChannelData(0).set(audio);
 
-    txSource = audioCtx.createBufferSource();
-    txSource.buffer = buffer;
-    analyser = audioCtx.createAnalyser();
-    txSource.connect(analyser);
-    analyser.connect(audioCtx.destination);
+        txSource = audioCtx.createBufferSource();
+        txSource.buffer = buffer;
+        txSource.connect(audioCtx.destination);
 
-    elements.btnStop.disabled = false;
-    elements.status.textContent = 'Transmitting...';
+        document.getElementById('btn-stop').disabled = false;
+        document.getElementById('tx-status').textContent = 'Transmitting...';
 
-    const startTime = audioCtx.currentTime;
-    const duration = buffer.duration;
+        var startTime = audioCtx.currentTime;
+        var duration = buffer.duration;
 
-    function updateProgress() {
-        if (!txSource) return;
-        const elapsed = audioCtx.currentTime - startTime;
-        const pct = Math.min(100, elapsed / duration * 100);
-        elements.progress.style.width = pct + '%';
-        if (elapsed < duration) {
-            animFrame = requestAnimationFrame(updateProgress);
+        function updateProgress() {
+            if (!txSource) return;
+            var elapsed = audioCtx.currentTime - startTime;
+            var pct = Math.min(100, elapsed / duration * 100);
+            document.getElementById('tx-progress').style.width = pct + '%';
+            if (elapsed < duration) {
+                animFrame = requestAnimationFrame(updateProgress);
+            }
         }
-    }
 
-    txSource.onended = () => {
-        elements.status.textContent = 'Done!';
-        elements.btnTransmit.disabled = false;
-        elements.btnSave.disabled = false;
-        elements.btnStop.disabled = true;
-        elements.progress.style.width = '100%';
-        txSource = null;
-    };
+        txSource.onended = function() {
+            document.getElementById('tx-status').textContent = 'Done!';
+            document.getElementById('btn-transmit').disabled = false;
+            document.getElementById('btn-save').disabled = false;
+            document.getElementById('btn-stop').disabled = true;
+            document.getElementById('tx-progress').style.width = '100%';
+            txSource = null;
+        };
 
-    txSource.start();
-    updateProgress();
+        txSource.start();
+        updateProgress();
+    }, 50);
 }
 
-/**
- * Stop transmission
- */
 function stopTransmit() {
     if (txSource) {
         txSource.stop();
@@ -131,38 +106,33 @@ function stopTransmit() {
         cancelAnimationFrame(animFrame);
         animFrame = null;
     }
-    elements.btnTransmit.disabled = false;
-    elements.btnSave.disabled = false;
-    elements.btnStop.disabled = true;
-    elements.status.textContent = 'Stopped';
+    document.getElementById('btn-transmit').disabled = false;
+    document.getElementById('btn-save').disabled = false;
+    document.getElementById('btn-stop').disabled = true;
+    document.getElementById('tx-status').textContent = 'Stopped';
 }
 
-/**
- * Save encoded audio as WAV file
- */
-async function saveAudio() {
-    elements.status.textContent = 'Encoding audio...';
-    elements.btnSave.disabled = true;
-    elements.btnTransmit.disabled = true;
+function saveAudio() {
+    document.getElementById('tx-status').textContent = 'Encoding audio...';
+    document.getElementById('btn-save').disabled = true;
+    document.getElementById('btn-transmit').disabled = true;
 
-    await new Promise(r => setTimeout(r, 50));
+    setTimeout(function() {
+        var canvas = document.getElementById('tx-canvas');
+        var ctx = canvas.getContext('2d');
+        var imageData = ctx.getImageData(0, 0, WIDTH, HEIGHT);
+        var audio = encodeSSTV(imageData);
+        var wavBuffer = createWavFile(audio, SAMPLE_RATE);
 
-    const ctx = elements.canvas.getContext('2d');
-    const imageData = ctx.getImageData(0, 0, WIDTH, HEIGHT);
-    const audio = encodeSSTV(imageData);
-    const wavBuffer = createWavFile(audio, SAMPLE_RATE);
+        var blob = new Blob([wavBuffer], { type: 'audio/wav' });
+        var link = document.createElement('a');
+        link.download = 'sstv_robot36_' + Date.now() + '.wav';
+        link.href = URL.createObjectURL(blob);
+        link.click();
+        URL.revokeObjectURL(link.href);
 
-    const blob = new Blob([wavBuffer], { type: 'audio/wav' });
-    const link = document.createElement('a');
-    link.download = 'sstv_robot36_' + Date.now() + '.wav';
-    link.href = URL.createObjectURL(blob);
-    link.click();
-    URL.revokeObjectURL(link.href);
-
-    elements.btnSave.disabled = false;
-    elements.btnTransmit.disabled = false;
-    elements.status.textContent = 'Audio saved!';
+        document.getElementById('btn-save').disabled = false;
+        document.getElementById('btn-transmit').disabled = false;
+        document.getElementById('tx-status').textContent = 'Audio saved!';
+    }, 50);
 }
-
-// Initialize when DOM is ready
-document.addEventListener('DOMContentLoaded', init);
