@@ -66,6 +66,16 @@ body {
     padding: 3rem 2rem;
 }
 
+/* Panels for tab switching */
+.panel {
+    animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
 /* Title */
 .title {
     font-family: 'Tektur', sans-serif;

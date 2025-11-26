@@ -2,10 +2,115 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="refresh" content="0; url=tx.html">
-    <title>SSTV Robot36</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSTV Robot36 | MGXS</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <p>Redirecting to <a href="tx.html">TX page</a>...</p>
+    <header class="header">
+        <a href="https://mgxs.co" class="logo">
+            <img src="https://images.squarespace-cdn.com/content/v1/6571e36aba71cb56d944e911/a11fb335-c0f5-42cf-bc6c-acf2330c6c48/MGXS_LOGO_BK.png" alt="MGXS">
+        </a>
+        <nav class="nav">
+            <a href="#" id="nav-tx" class="active" onclick="showTab('tx'); return false;">TX</a>
+            <a href="#" id="nav-rx" onclick="showTab('rx'); return false;">RX</a>
+        </nav>
+    </header>
+
+    <main class="main">
+        <!-- TX Panel -->
+        <div id="panel-tx" class="panel">
+            <h1 class="title">SSTV TRANSMIT</h1>
+
+            <div class="section">
+                <div class="image-box clickable" onclick="document.getElementById('file-input').click()">
+                    <canvas id="tx-canvas" width="320" height="240" style="display:none;"></canvas>
+                    <div class="placeholder" id="tx-placeholder">Click to load image</div>
+                </div>
+
+                <input type="file" id="file-input" accept="image/*">
+
+                <div class="controls">
+                    <button id="btn-transmit" disabled>Transmit</button>
+                    <button id="btn-tx-stop" disabled>Stop</button>
+                    <button id="btn-tx-save" disabled>Save Audio</button>
+                </div>
+
+                <div class="progress">
+                    <div class="progress-fill" id="tx-progress"></div>
+                </div>
+
+                <div class="status" id="tx-status">Load an image to begin</div>
+            </div>
+        </div>
+
+        <!-- RX Panel -->
+        <div id="panel-rx" class="panel" style="display:none;">
+            <h1 class="title">SSTV RECEIVE</h1>
+
+            <div class="section">
+                <div class="image-box">
+                    <canvas id="rx-canvas" width="320" height="240"></canvas>
+                    <div class="placeholder" id="rx-placeholder">Decoded image</div>
+                    <div class="line-indicator" id="line-indicator" style="display:none;">0/240</div>
+                </div>
+
+                <input type="file" id="audio-file" accept="audio/*,.wav,.mp3,.ogg,.m4a">
+
+                <div class="controls">
+                    <button id="btn-start">Start</button>
+                    <button onclick="document.getElementById('audio-file').click()">Load Audio</button>
+                    <button id="btn-rx-save" disabled>Save Image</button>
+                    <button id="btn-clear">Clear</button>
+                </div>
+
+                <div class="progress">
+                    <div class="progress-fill" id="rx-progress"></div>
+                </div>
+
+                <div class="status" id="rx-status">Click Start to listen for signal</div>
+
+                <div class="slider-row">
+                    <label>Phase</label>
+                    <input type="range" id="phase-slider" min="-20000" max="20000" value="0">
+                    <span class="value" id="phase-value">0</span>
+                </div>
+
+                <div class="slider-row">
+                    <label>Skew</label>
+                    <input type="range" id="skew-slider" min="-50" max="50" value="0" step="0.5">
+                    <span class="value" id="skew-value">0</span>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="footer">
+        "I'm now much closer to the idea of achieving a true dialogue with machines than I have ever been."
+    </footer>
+
+    <script src="sstv.js"></script>
+    <script src="tx.js"></script>
+    <script src="rx.js"></script>
+    <script>
+        function showTab(tab) {
+            var txPanel = document.getElementById('panel-tx');
+            var rxPanel = document.getElementById('panel-rx');
+            var txNav = document.getElementById('nav-tx');
+            var rxNav = document.getElementById('nav-rx');
+
+            if (tab === 'tx') {
+                txPanel.style.display = 'block';
+                rxPanel.style.display = 'none';
+                txNav.classList.add('active');
+                rxNav.classList.remove('active');
+            } else {
+                txPanel.style.display = 'none';
+                rxPanel.style.display = 'block';
+                txNav.classList.remove('active');
+                rxNav.classList.add('active');
+            }
+        }
+    </script>
 </body>
 </html>

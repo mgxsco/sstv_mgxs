@@ -33,7 +33,7 @@ document.addEventListener('DOMContentLoaded', function() {
             canvas.style.display = 'block';
             document.getElementById('tx-placeholder').style.display = 'none';
             document.getElementById('btn-transmit').disabled = false;
-            document.getElementById('btn-save').disabled = false;
+            document.getElementById('btn-tx-save').disabled = false;
             document.getElementById('tx-status').textContent = 'Ready to transmit or save';
             URL.revokeObjectURL(img.src);
         };
@@ -50,12 +50,12 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // Stop button
-    document.getElementById('btn-stop').addEventListener('click', function() {
+    document.getElementById('btn-tx-stop').addEventListener('click', function() {
         stopTransmit();
     });
 
     // Save button
-    document.getElementById('btn-save').addEventListener('click', function() {
+    document.getElementById('btn-tx-save').addEventListener('click', function() {
         saveAudio();
     });
 
@@ -72,7 +72,7 @@ document.addEventListener('DOMContentLoaded', function() {
 function transmit() {
     document.getElementById('tx-status').textContent = 'Encoding...';
     document.getElementById('btn-transmit').disabled = true;
-    document.getElementById('btn-save').disabled = true;
+    document.getElementById('btn-tx-save').disabled = true;
 
     // Initialize/resume audio context first
     var ctx = initAudioContext();
@@ -90,7 +90,7 @@ function transmit() {
         txSource.buffer = buffer;
         txSource.connect(ctx.destination);
 
-        document.getElementById('btn-stop').disabled = false;
+        document.getElementById('btn-tx-stop').disabled = false;
         document.getElementById('tx-status').textContent = 'Transmitting...';
 
         var startTime = ctx.currentTime;
@@ -109,8 +109,8 @@ function transmit() {
         txSource.onended = function() {
             document.getElementById('tx-status').textContent = 'Done!';
             document.getElementById('btn-transmit').disabled = false;
-            document.getElementById('btn-save').disabled = false;
-            document.getElementById('btn-stop').disabled = true;
+            document.getElementById('btn-tx-save').disabled = false;
+            document.getElementById('btn-tx-stop').disabled = true;
             document.getElementById('tx-progress').style.width = '100%';
             txSource = null;
         };
@@ -130,14 +130,14 @@ function stopTransmit() {
         animFrame = null;
     }
     document.getElementById('btn-transmit').disabled = false;
-    document.getElementById('btn-save').disabled = false;
-    document.getElementById('btn-stop').disabled = true;
+    document.getElementById('btn-tx-save').disabled = false;
+    document.getElementById('btn-tx-stop').disabled = true;
     document.getElementById('tx-status').textContent = 'Stopped';
 }
 
 function saveAudio() {
     document.getElementById('tx-status').textContent = 'Encoding audio...';
-    document.getElementById('btn-save').disabled = true;
+    document.getElementById('btn-tx-save').disabled = true;
     document.getElementById('btn-transmit').disabled = true;
 
     setTimeout(function() {
@@ -154,7 +154,7 @@ function saveAudio() {
         link.click();
         URL.revokeObjectURL(link.href);
 
-        document.getElementById('btn-save').disabled = false;
+        document.getElementById('btn-tx-save').disabled = false;
         document.getElementById('btn-transmit').disabled = false;
         document.getElementById('tx-status').textContent = 'Audio saved!';
     }, 50);

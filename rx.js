@@ -40,7 +40,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    document.getElementById('btn-save').addEventListener('click', function() {
+    document.getElementById('btn-rx-save').addEventListener('click', function() {
         saveImage();
     });
 
@@ -245,7 +245,7 @@ function processStreamChunk(chunk) {
 
     if (streamLineNum >= HEIGHT) {
         document.getElementById('rx-status').textContent = 'Complete! Decoded ' + streamLineNum + ' lines';
-        document.getElementById('btn-save').disabled = false;
+        document.getElementById('btn-rx-save').disabled = false;
         setTimeout(function() {
             if (isListening) stopListening();
         }, 500);
@@ -338,7 +338,7 @@ function stopAndDecode() {
 
     if (streamLineNum > 0) {
         document.getElementById('rx-status').textContent = 'Decoded ' + streamLineNum + '/' + HEIGHT + ' lines - preparing adjustments...';
-        document.getElementById('btn-save').disabled = false;
+        document.getElementById('btn-rx-save').disabled = false;
 
         if (rxChunks.length > 0) {
             var totalLen = 0;
@@ -434,7 +434,7 @@ function runFullDecode() {
         try {
             var linesDecoded = decodeSSTV(combined);
             if (linesDecoded && linesDecoded >= 3) {
-                document.getElementById('btn-save').disabled = false;
+                document.getElementById('btn-rx-save').disabled = false;
                 document.getElementById('rx-status').textContent = 'Decoded ' + linesDecoded + ' lines - adjust alignment below';
             } else {
                 document.getElementById('rx-status').textContent = 'Could not decode - try again';
@@ -785,7 +785,7 @@ function clearRx() {
 
     document.getElementById('rx-placeholder').style.display = 'block';
     document.getElementById('line-indicator').style.display = 'none';
-    document.getElementById('btn-save').disabled = true;
+    document.getElementById('btn-rx-save').disabled = true;
     document.getElementById('rx-progress').style.width = '0%';
     document.getElementById('rx-status').textContent = 'Click Start to listen for signal';
 }
